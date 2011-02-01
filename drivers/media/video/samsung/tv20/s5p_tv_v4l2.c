@@ -541,8 +541,10 @@ static int s5p_tv_v4l2_s_fmt_vid_out(struct file *file, void *fh,
 					&temp_addr);
 				_s5p_vlayer_set_img_size((unsigned long)
 					&img_size);
+			#if 0
 				_s5p_vlayer_set_src_size((unsigned long)
 					&img_size);
+			#endif
 
 			}
 		} else if (vparam.pix_fmt.field == V4L2_FIELD_INTERLACED_TB) {
@@ -588,8 +590,11 @@ static int s5p_tv_v4l2_s_fmt_vid_out(struct file *file, void *fh,
 					&temp_addr);
 				_s5p_vlayer_set_img_size((unsigned long)
 					&img_size);
+					
+				#if 0
 				_s5p_vlayer_set_src_size((unsigned long)
 					&img_size);
+					#endif
 
 			}
 

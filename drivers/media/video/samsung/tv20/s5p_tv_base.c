@@ -935,7 +935,7 @@ void s5p_handle_cable(void)
     if(s5ptv_status.tvout_param.out_mode != TVOUT_OUTPUT_HDMI && s5ptv_status.tvout_param.out_mode != TVOUT_OUTPUT_HDMI_RGB)
         return;
 #endif
-
+	msleep(10);
     bool previous_hpd_status = s5ptv_status.hpd_status;
 #ifdef CONFIG_HDMI_HPD
     s5ptv_status.hpd_status= s5p_hpd_get_state();

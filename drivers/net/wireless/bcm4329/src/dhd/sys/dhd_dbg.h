@@ -58,7 +58,7 @@
 
 #else /* (defined BCMDBG) || (defined DHD_DEBUG) */
 
-#define DHD_ERROR(args)    	do {if (net_ratelimit()) printf args;} while (0)
+#define DHD_ERROR(args)    	printf args
 #define DHD_TRACE(args)
 #define DHD_INFO(args)
 #define DHD_DATA(args)

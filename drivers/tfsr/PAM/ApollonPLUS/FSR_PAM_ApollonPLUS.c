@@ -1,24 +1,18 @@
 /**
- *   @mainpage   Flex Sector Remapper : LinuStoreIII_1.2.0_b034-FSR_1.2.1p1_b129_RC
+ *   @mainpage   Flex Sector Remapper : LinuStoreIII_1.2.0_b038-FSR_1.2.1p1_b139_RTM
  *
  *   @section Intro
  *       Flash Translation Layer for Flex-OneNAND and OneNAND
  *    
  *    @section  Copyright
- *            COPYRIGHT. 2007 - 2008 SAMSUNG ELECTRONICS CO., LTD.               
- *                            ALL RIGHTS RESERVED                              
- *                                                                             
- *     Permission is hereby granted to licensees of Samsung Electronics        
- *     Co., Ltd. products to use or abstract this computer program for the     
- *     sole purpose of implementing a product based on Samsung                 
- *     Electronics Co., Ltd. products. No other rights to reproduce, use,      
- *     or disseminate this computer program, whether in part or in whole,      
- *     are granted.                                                            
- *                                                                             
- *     Samsung Electronics Co., Ltd. makes no representation or warranties     
- *     with respect to the performance of this computer program, and           
- *     specifically disclaims any responsibility for any damages,              
- *     special or consequential, connected with the use of this program.       
+ *---------------------------------------------------------------------------*
+ *                                                                           *
+ * Copyright (C) 2003-2010 Samsung Electronics                               *
+ * This program is free software; you can redistribute it and/or modify      *
+ * it under the terms of the GNU General Public License version 2 as         *
+ * published by the Free Software Foundation.                                *
+ *                                                                           *
+ *---------------------------------------------------------------------------*
  *
  *     @section Description
  *

@@ -141,7 +141,7 @@ struct key_table dock_keycodes[KEYBOARD_SIZE] =
     {	KEY_RESERVED,       	 false},	//	71		47
     {	KEY_FASTFORWARD,    	 false},	//	72		48
     {	KEY_VOLUMEDOWN,     	 false},	//	73		49
-    {	KEY_VOLUMEUP,       	 false},	//	4A
+    {	KEY_RESERVED,       	 false},	//	4A
     {	KEY_RESERVED,       	 false},	//	75		4B
     {	KEY_VOLUMEUP,       	 false},	//	76		4C
     {	KEY_RESERVED,       	 false},	//	77		4D
@@ -168,7 +168,7 @@ struct key_table dock_keycodes[KEYBOARD_SIZE] =
     {	KEY_KPDOT,          	 false},	//	98		62
     {	KEY_RESERVED,       	 false},	//	99		63
     {	KEY_BACKSLASH,      	 false},	//	100		64      //For the UK keyboard
-    {	KEY_MENU,           	 false},	//	101		65
+    {	KEY_F18,           	 false},	//	101		65
     {	KEY_RESERVED,       	 false},	//	102		66
     {	KEY_RESERVED,       	 false},	//	103		67
     {	KEY_RESERVED,       	 false},	//	104		68

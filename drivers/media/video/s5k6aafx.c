@@ -510,6 +510,7 @@ static int s5k6aafx_write_regs(struct v4l2_subdev *sd,
 static int s5k6aafx_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct s5k6aafx_state *state = to_state(sd);
 	
 	int err = -EINVAL;
 	unsigned short lvalue = 0;
@@ -547,6 +548,8 @@ static int s5k6aafx_set_capture_start(struct v4l2_subdev *sd, struct v4l2_contro
 		return err;
 	}
 
+	state->runmode = S5K6AAFX_RUNMODE_IDLE;
+
 	return err;
 }
 
@@ -583,6 +586,13 @@ static int s5k6aafx_set_preview_start(struct v4l2_subdev *sd)
                 return err;
             }
 	}
+	if(state->set_vhflip == 1)
+	{
+		err = s5k6aafx_write_regs(sd, s5k6aafx_vhflip_on,
+					sizeof(s5k6aafx_vhflip_on) / sizeof(s5k6aafx_vhflip_on[0]));		
+	}
+		
+	state->runmode = S5K6AAFX_RUNMODE_RUNNING;
 //	mdelay(200); // add 200 ms for displaying preview
 
 	return err;
@@ -590,7 +600,11 @@ static int s5k6aafx_set_preview_start(struct v4l2_subdev *sd)
 
 static int s5k6aafx_set_preview_stop(struct v4l2_subdev *sd)
 {
+	struct s5k6aafx_state *state = to_state(sd);
+
 	int err = 0;
+
+	state->runmode = S5K6AAFX_RUNMODE_IDLE;
 
 	return err;
 }
@@ -1064,10 +1078,19 @@ static int s5k6aafx_check_dataline_stop(struct v4l2_subdev *sd)
 
 static int s5k6aafx_set_flip(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 {
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct s5k6aafx_state *state = to_state(sd);
 	int err = 0;
+
 	FUNC_ENTR();
 
-	if((ctrl->value) == 1)
+	if(state->runmode != S5K6AAFX_RUNMODE_RUNNING)
+	{
+		return 0;
+	}
+
+
+	if(state->set_vhflip == 1)
 	{
 			err = s5k6aafx_write_regs(sd, s5k6aafx_vhflip_on,
 					sizeof(s5k6aafx_vhflip_on) / sizeof(s5k6aafx_vhflip_on[0]));
@@ -1205,7 +1228,12 @@ static int s5k6aafx_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 			err = 0;
 			break;
 
+		case V4L2_CID_CAMERA_SENSOR_MODE:
+			err = 0;
+			break;
+
 		case V4L2_CID_CAMERA_CHECK_FLIP:
+			state->set_vhflip = ctrl->value;
 			err = s5k6aafx_set_flip(sd, ctrl);
 			break;
 
@@ -1261,6 +1289,9 @@ static int s5k6aafx_probe(struct i2c_client *client,
 	state = kzalloc(sizeof(struct s5k6aafx_state), GFP_KERNEL);
 	if (state == NULL)
 		return -ENOMEM;
+
+	state->runmode = S5K6AAFX_RUNMODE_NOTREADY;
+	state->set_vhflip = 0;
 
 	sd = &state->sd;
 	strcpy(sd->name, S5K6AAFX_DRIVER_NAME);

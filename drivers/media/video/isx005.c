@@ -35,8 +35,11 @@
 #define FORMAT_FLAGS_COMPRESSED			0x3
 #define SENSOR_JPEG_SNAPSHOT_MEMSIZE	0x33F000     //3403776 //2216 * 1536
 
+#define FACTORY_CHECK
+
 //#define ISX005_DEBUG
 //#define CONFIG_LOAD_FILE	//For tunning binary
+//#define ISX005_TOUCH_AF
 
 #ifdef ISX005_DEBUG
 #define isx005_msg	dev_err
@@ -44,6 +47,10 @@
 #define isx005_msg 	dev_dbg
 #endif
 
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[
+extern int gcamera_sensor_back_type;
+extern int gcamera_sensor_back_checked;
+#endif // VE_GROUP ]]
 /* protect s_ctrl calls */
 static DEFINE_MUTEX(sensor_s_ctrl);
 
@@ -100,7 +107,7 @@ struct isx005_enum_framesize {
 	enum isx005_oprmode mode;
 	unsigned int index;
 	unsigned int width;
-	unsigned int height;	
+	unsigned int height;
 };
 
 static struct isx005_enum_framesize isx005_framesize_list[] = {
@@ -142,11 +149,11 @@ struct isx005_firmware {
 struct isx005_userset {
 	signed int exposure_bias;	/* V4L2_CID_EXPOSURE */
 	unsigned int auto_wb;		/* V4L2_CID_AUTO_WHITE_BALANCE */
-	unsigned int manual_wb;		/* V4L2_CID_WHITE_BALANCE_PRESET */
+	unsigned int manual_wb;	/* V4L2_CID_WHITE_BALANCE_PRESET */
 	unsigned int effect;		/* Color FX (AKA Color tone) */
 	unsigned int contrast;		/* V4L2_CID_CONTRAST */
 	unsigned int saturation;	/* V4L2_CID_SATURATION */
-	unsigned int sharpness;		/* V4L2_CID_SHARPNESS */
+	unsigned int sharpness;	/* V4L2_CID_SHARPNESS */
 };
 
 struct isx005_jpeg_param {
@@ -224,7 +231,7 @@ unsigned int bit_format(unsigned char* ptr)
 	ptr++;
 	j = *ptr | 0xff ;
 	i = j;
-	ret = ret | i;			//	1
+	ret = ret | i;		//	1
 	ptr++;
 	j = *ptr | 0xff ;
 
@@ -252,65 +259,25 @@ void isx005_flash_set_first(struct v4l2_subdev *sd)
 #ifdef CONFIG_LOAD_FILE
 	isx005_i2c_write(sd, isx005_flash_first, sizeof(isx005_flash_first) / sizeof(isx005_flash_first[0]), "isx005_flash_first");
 #else
-	ret = isx005_i2c_write_multi(client, 0x00FC, 0x001F, 1); //100813 //100820
-	ret = isx005_i2c_write_multi(client, 0x4066, 0x000F, 1); //100813 //100816
+	ret = isx005_i2c_write_multi(client, 0x00FC, 0x001F, 1);	//100813 //100820
+	ret = isx005_i2c_write_multi(client, 0x4066, 0x000F, 1);	//100813 //100816
 	ret = isx005_i2c_write_multi(client, 0x402F, 0x000B, 1);
-//	ret = isx005_i2c_write_multi(client, 0x400A, 0x0020, 1);	//100816	
 	ret = isx005_i2c_write_multi(client, 0x404C, 0x002C, 1);	//100816
-	ret = isx005_i2c_write_multi(client, 0x400B, 0x003C, 1);	
-//	ret = isx005_i2c_write_multi(client, 0x0102, 0x0000, 1);//100816		
+	ret = isx005_i2c_write_multi(client, 0x400B, 0x003C, 1);
 #endif
 	//	Set LED & AE/AWB Control
 	led = 0xD;
 	ret = isx005_i2c_write_multi(client, LED_ON, led, sizeof(unsigned char));
-	aectrl = 5;	//	Set AE Hi-Speed mode (HALF_AE_CTRL(bit0)=1&CAP_AE_CTRL(bit1-2)=2)
+	aectrl = 5;		//Set AE Hi-Speed mode (HALF_AE_CTRL(bit0)=1&CAP_AE_CTRL(bit1-2)=2)
 	ret = isx005_i2c_write_multi(client, CAP_HALF_AE_CTRL, aectrl, sizeof(unsigned char));
-//	printk(" +++++++++CAP_HALF_AE_CTRL ==== 5 +++++++++++++++++++++ \n");		
-	awbctrl = 1;	//	Set AWB Hi-Speed mode
+	awbctrl = 1;	//Set AWB Hi-Speed mode
 	ret = isx005_i2c_write_multi(client, HALF_AWB_CTRL, awbctrl, sizeof(unsigned char));
 }
-/*
-	//	Set AE Speed
-	//	smod = 0x60;
-	//	ret = write_reg( AEINDEADBAND, sizeof(uchar), &smod );
-	//	smod = 0x02;
-	//	ret = write_reg( AEOUTDEADBAND, sizeof(uchar), &smod );
-	//	smod = 0x0A;
-	//	ret = write_reg( AE_SPEED_INIT, sizeof(uchar), &smod );
-
-	//	Move to Half Rel Mode
-	smod = 1;
-	ret = isx005_i2c_write_multi(client, MODESEL, smod, sizeof(uchar));
-
-	//	Wait 1V time
-
-	mdelay(1V);
-
-	//	LED PreFlash
-	ret = line_control( LED_FLASH, ON_HALF );
-
-	//	Wait for AE/AWB complete
-	for(;;) {
-		ret = isx005_i2c_read(client, HALF_MOVE_STS, &a_sts );
-		if ( a_sts == 0 )
-			break;
-		mdelay(1);	//	1ms sleep
-	}
-	//	Wait for AF complete
-	for(;;) {
-		ret = isx005_i2c_read(client, AF_STATE, &afsts );
-		if ( afsts == 8 )
-			break;
-		mdelay(1);	//	1ms sleep
-	}
-	//	LED PreFlash OFF
-	ret = line_control( LED_FLASH, OFF );
-*/
 
 void isx005_flash_set_second(struct v4l2_subdev *sd)
 {
 	short unsigned int	ae_now = 0, ersc_now = 0;
-	short unsigned int	gain = 0, shutter1 = 0, shutter2 = 0;	
+	short unsigned int	gain = 0, shutter1 = 0, shutter2 = 0;
 	short unsigned int	r_now = 0, b_now = 0;
 	short unsigned int	aediff, aeoffset;
 
@@ -352,7 +319,7 @@ void isx005_flash_set_second(struct v4l2_subdev *sd)
 	if ( (short signed int)aediff >= AE_MAXDIFF )
 	{
 #ifdef CONFIG_LOAD_FILE		
-		aeoffset = -ae_offsetval_value - ersc_now;	
+		aeoffset = -ae_offsetval_value - ersc_now;
 #else
 		aeoffset = -AE_OFFSETVAL - ersc_now;
 #endif
@@ -369,14 +336,14 @@ void isx005_flash_set_second(struct v4l2_subdev *sd)
 	ret = isx005_i2c_write_multi(client, CAP_GAINOFFSET, aeoffset, sizeof(short unsigned int));
 	dev_err(&client->dev, "%s: AESCL_NOW : %d, ERRSCL_NOW : %d, aediff : %d, aeoffset : %d\n", __func__, ae_now, ersc_now, aediff, aeoffset);
 
-	aectrl = 4;	//	Set AE Hi-Speed mode (HALF_AE_CTRL(bit0)=0&CAP_AE_CTRL(bit1-2)=2)
+	aectrl = 4;		//Set AE Hi-Speed mode (HALF_AE_CTRL(bit0)=0&CAP_AE_CTRL(bit1-2)=2)
 	ret = isx005_i2c_write_multi(client, CAP_HALF_AE_CTRL, aectrl, sizeof(unsigned char));
 
 	if(gLowLight_flash_second)
 	{
 		printk("isx005_flash_set_second ---- gLowLight_flash_second = %d ++++++++++\n", gLowLight_flash_second);
 #ifdef CONFIG_LOAD_FILE		
-		ret = isx005_i2c_write_multi(client, 0x445E, awb_blueoffset, 2);	
+		ret = isx005_i2c_write_multi(client, 0x445E, awb_blueoffset, 2);
 #else
 		ret = isx005_i2c_write_multi(client, 0x445E, AWB_BLUEOFFSET, 2);
 #endif
@@ -384,7 +351,6 @@ void isx005_flash_set_second(struct v4l2_subdev *sd)
 	else//100816
 	{
 		ret = isx005_i2c_write_multi(client, 0x445E, 0x00C8, 2);
-
 	}
 	
 	//	Set AWB offset
@@ -413,13 +379,8 @@ void isx005_flash_end_capture(struct v4l2_subdev *sd)
 
 	isx005_i2c_write_multi(client, 0x4066, 0x000A, 1);//100816
 	isx005_i2c_write_multi(client, 0x402F, 0x000F, 1);
-//	isx005_i2c_write_multi(client, 0x400A, 0x0008, 1);	//100816		
-	isx005_i2c_write_multi(client, 0x404C, 0x0020, 1);	
+	isx005_i2c_write_multi(client, 0x404C, 0x0020, 1);
 	isx005_i2c_write_multi(client, 0x400B, 0x001A, 1);
-//100820	isx005_i2c_write_multi(client, 0x400C, 0x0004, 1);	
-//	isx005_i2c_write_multi(client, 0x0102, 0x0020, 1);//100816	
-
-
 }
 
 static inline int isx005_flash(int lux_val, struct v4l2_subdev *sd)
@@ -449,7 +410,6 @@ static inline int isx005_flash(int lux_val, struct v4l2_subdev *sd)
 		gpio_direction_output(S5PV210_MP04(3), 0);
 		for (i = lux_val; i > 1; i--)
 		{
-//			printk("%s : highlow\n", __func__);
 			//gpio on
 			gpio_direction_output(S5PV210_MP04(2), 1);
 			udelay(1);
@@ -465,7 +425,6 @@ static inline int isx005_flash(int lux_val, struct v4l2_subdev *sd)
 		//flash off
 		gpio_direction_output(S5PV210_MP04(2), 0);
 		gpio_direction_output(S5PV210_MP04(3), 0);
-	//	err = isx005_i2c_write(sd, isx005_Flash_off, sizeof(isx005_Flash_off) / sizeof(isx005_Flash_off[0]),				"isx005_Flash_off");
 	}
 	else
 	{
@@ -473,7 +432,6 @@ static inline int isx005_flash(int lux_val, struct v4l2_subdev *sd)
 		udelay(20);
 		for (i = lux_val; i > 1; i--)
 		{
-//			printk("%s : highlow\n", __func__);
 			//gpio on
 			gpio_direction_output(S5PV210_MP04(2), 1);
 			udelay(1);
@@ -483,12 +441,12 @@ static inline int isx005_flash(int lux_val, struct v4l2_subdev *sd)
 		}
 		gpio_direction_output(S5PV210_MP04(2), 1);
 		msleep(2);
-//		err = isx005_i2c_write(sd, isx005_Flash_on, sizeof(isx005_Flash_on) / sizeof(isx005_Flash_on[0]),				"isx005_Flash_on");
 	}
-	gpio_free(S5PV210_MP04(2));	
+	gpio_free(S5PV210_MP04(2));
 	gpio_free(S5PV210_MP04(3));
 	return err;
 }
+
 /** 
  * isx005_i2c_read_multi: Read (I2C) multiple bytes to the camera sensor 
  * @client: pointer to i2c_client
@@ -520,7 +478,7 @@ static inline int isx005_i2c_read_multi(struct i2c_client *client,
 	err = i2c_transfer(client->adapter, &msg, 1);
 	if (unlikely(err < 0))
 	{
-		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
+		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);
 		return -EIO;
 	}
 
@@ -530,7 +488,7 @@ static inline int isx005_i2c_read_multi(struct i2c_client *client,
 	err = i2c_transfer(client->adapter, &msg, 1);
 	if (unlikely(err < 0))
 	{
-		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
+		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);
 		return -EIO;
 	}
 
@@ -572,7 +530,7 @@ static inline int isx005_i2c_read(struct i2c_client *client,
 	err = i2c_transfer(client->adapter, &msg, 1);
 	if (unlikely(err < 0))
 	{
-		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
+		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);
 		return -EIO;
 	}
 
@@ -581,7 +539,7 @@ static inline int isx005_i2c_read(struct i2c_client *client,
 	err = i2c_transfer(client->adapter, &msg, 1);
 	if (unlikely(err < 0))
 	{
-		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
+		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);
 		return -EIO;
 	}
 
@@ -619,7 +577,7 @@ static inline int isx005_i2c_write_multi(struct i2c_client *client, unsigned sho
 	} 
 
 	buf[0] = addr >> 8;
-	buf[1] = addr & 0xff;	
+	buf[1] = addr & 0xff;
 
 	/* 
 	 * Data should be written in Little Endian in parallel mode; So there
@@ -692,6 +650,30 @@ static int isx005_i2c_write(struct v4l2_subdev *sd, isx005_short_t regs[],
 	return 0;
 }
 
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS[[
+static int isx005_check_sensorId(struct v4l2_subdev *sd)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	int err = 0;
+	int read_value;
+	if (gcamera_sensor_back_checked) 
+	{
+		printk("%s: gcamera_sensor_back_checked(%d) gcamera_sensor_back_type(%d)\n", __func__ , gcamera_sensor_back_checked ,gcamera_sensor_back_type);
+		if (gcamera_sensor_back_type == CAMERA_SENSOR_ID_ISX005)
+			return 0;
+		else
+			return -EIO;
+	}
+	err = isx005_i2c_read(client, 0x00F8, &read_value);
+	if (err>=0)
+	{
+		gcamera_sensor_back_type = CAMERA_SENSOR_ID_ISX005;
+		gcamera_sensor_back_checked = true;
+	}
+	printk("%s: VE_GROUP (%d)(%d)\n", __func__ , err ,gcamera_sensor_back_type);
+	return err;
+} 
+#endif // VE_GROUP ]]
 #ifdef CONFIG_LOAD_FILE
 
 #include <linux/vmalloc.h>
@@ -710,7 +692,6 @@ int isx005_regs_table_init(void)
 	char *dp;
 	long l;
 	loff_t pos;
-//	int i;
 	int ret;
 	mm_segment_t fs = get_fs();
 
@@ -729,10 +710,9 @@ int isx005_regs_table_init(void)
 		return PTR_ERR(filp);
 	}
 	
-	l = filp->f_path.dentry->d_inode->i_size;	
+	l = filp->f_path.dentry->d_inode->i_size;
 	printk("l = %ld\n", l);
 	dp = kmalloc(l, GFP_KERNEL);
-//	dp = vmalloc(l);	
 	if (dp == NULL) 
 	{
 		printk("Out of Memory\n");
@@ -746,8 +726,7 @@ int isx005_regs_table_init(void)
 	if (ret != l) 
 	{
 		printk("Failed to read file ret = %d\n", ret);
-//		kfree(dp);
-		vfree(dp);
+		kfree(dp);
 		filp_close(filp, current->files);
 		return -EINVAL;
 	}
@@ -782,14 +761,14 @@ void isx005_regs_table_exit(void)
 
 static int isx005_regs_table_write(struct i2c_client *client, char *name)
 {
-	char *start, *end, *reg;	
+	char *start, *end, *reg;
 	unsigned short addr;
-	unsigned int len, value;	
+	unsigned int len, value;
 	char reg_buf[7], data_buf[7], len_buf[2];
 
 	*(reg_buf + 6) = '\0';
 	*(data_buf + 6) = '\0';
-	*(len_buf + 1) = '\0';	
+	*(len_buf + 1) = '\0';
 
 	isx005_msg(&client->dev,"isx005_regs_table_write start!\n");
 
@@ -799,7 +778,7 @@ static int isx005_regs_table_write(struct i2c_client *client, char *name)
 	while (1) 
 	{	
 		/* Find Address */	
-		reg = strstr(start,"{0x");		
+		reg = strstr(start,"{0x");
 		if (reg)
 		{
 			start = (reg + 19);  //{0x000b, 0x0004, 1},	
@@ -813,29 +792,15 @@ static int isx005_regs_table_write(struct i2c_client *client, char *name)
 		/* Write Value to Address */	
 		if (reg != NULL) 
 		{
-			memcpy(reg_buf, (reg + 1), 6);	
-			memcpy(data_buf, (reg + 9), 6);	
-			memcpy(len_buf, (reg + 17), 1);			
+			memcpy(reg_buf, (reg + 1), 6);
+			memcpy(data_buf, (reg + 9), 6);
+			memcpy(len_buf, (reg + 17), 1);
 			addr = (unsigned short)simple_strtoul(reg_buf, NULL, 16); 
 			value = (unsigned int)simple_strtoul(data_buf, NULL, 16); 
 			len = (unsigned int)simple_strtoul(len_buf, NULL, 10); 			
-//			printk("addr 0x%04x, value 0x%04x, len %d\n", addr, value, len);
 			
 			if (addr == 0xdddd)
 			{
-/*				if (value == 0x0010)
-				mdelay(10);
-				else if (value == 0x0020)
-				mdelay(20);
-				else if (value == 0x0030)
-				mdelay(30);
-				else if (value == 0x0040)
-				mdelay(40);
-				else if (value == 0x0050)
-				mdelay(50);
-				else if (value == 0x0100)
-				mdelay(100);
-*/
 				msleep(value);
 				isx005_msg(&client->dev,"delay 0x%04x, value 0x%04x, , len 0x%01x\n", addr, value, len);
 			}	
@@ -853,7 +818,7 @@ static int isx005_regs_table_write(struct i2c_client *client, char *name)
 
 static short isx005_regs_ae_offsetval_value(char *name)
 {
-	char *start, *reg;	
+	char *start, *reg;
 	unsigned short value;
 	char data_buf[7];
 
@@ -864,7 +829,7 @@ static short isx005_regs_ae_offsetval_value(char *name)
 	start = strstr(isx005_regs_table, name);
 	
 	/* Find Address */	
-	reg = strstr(start," 0x");		
+	reg = strstr(start," 0x");
 	if (reg == NULL)
 	{
 		return 0;
@@ -873,7 +838,7 @@ static short isx005_regs_ae_offsetval_value(char *name)
 	/* Write Value to Address */	
 	if (reg != NULL) 
 	{
-		memcpy(data_buf, (reg + 1), 6);	
+		memcpy(data_buf, (reg + 1), 6);
 		value = (unsigned short)simple_strtoul(data_buf, NULL, 16); 
 	}
 	
@@ -884,7 +849,7 @@ static short isx005_regs_ae_offsetval_value(char *name)
 
 static short isx005_regs_max_value(char *name)
 {
-	char *start, *reg;	
+	char *start, *reg;
 	unsigned short value;
 	char data_buf[7];
 
@@ -895,7 +860,7 @@ static short isx005_regs_max_value(char *name)
 	start = strstr(isx005_regs_table, name);
 	
 	/* Find Address */	
-	reg = strstr(start," 0x");		
+	reg = strstr(start," 0x");
 	if (reg == NULL)
 	{
 		return 0;
@@ -904,7 +869,7 @@ static short isx005_regs_max_value(char *name)
 	/* Write Value to Address */	
 	if (reg != NULL) 
 	{
-		memcpy(data_buf, (reg + 1), 6);	
+		memcpy(data_buf, (reg + 1), 6);
 		value = (unsigned short)simple_strtoul(data_buf, NULL, 16); 
 	}
 	
@@ -964,12 +929,13 @@ static int isx005_set_preview_stop(struct v4l2_subdev *sd)
 //	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct isx005_state *state = to_state(sd);
 
-	if(ISX005_RUNMODE_RUNNING == state->runmode)
+	if(state->runmode == ISX005_RUNMODE_RUNNING)
 	{
 		state->runmode = ISX005_RUNMODE_IDLE;
+		state->set_vhflip = 0;
 	}
 
-	printk("%s: change preview mode~~~~~~~~~~~~~~\n", __func__);	
+	printk("%s: change preview mode~~~~~~~~~~~~~~\n", __func__);
 	
 //	isx005_i2c_write_multi(client, 0x0011, 0x0011, 1);
 
@@ -1022,7 +988,7 @@ static int isx005_set_dzoom(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 			break;
 		default:
 			dev_err(&client->dev, "%s: unsupported zoom(%d) value.\n", __func__, ctrl->value);
-			break;			
+			break;
 	}
 
 	if(err < 0)
@@ -1039,7 +1005,7 @@ static int isx005_set_preview_size(struct v4l2_subdev *sd)
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct isx005_state *state = to_state(sd);
 
-	int err = 0, timeout_cnt = 0;	
+	int err = 0, timeout_cnt = 0;
 	unsigned short read_value = 0;
 
 	int index = state->framesize_index;
@@ -1083,7 +1049,7 @@ static int isx005_set_preview_size(struct v4l2_subdev *sd)
 		msleep(1);
 		if (timeout_cnt > 1000) 
 		{
-			dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+			dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 			break;
 		}
 	} while (!(read_value & 0x02));
@@ -1092,19 +1058,19 @@ static int isx005_set_preview_size(struct v4l2_subdev *sd)
 	do 
 	{
 		timeout_cnt++;
-		isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-		msleep(1);			
+		isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+		msleep(1);
 		isx005_i2c_read(client, 0x00F8, &read_value);
 		if (timeout_cnt > 1000) 
 		{
-			dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+			dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 			break;
 		}
-	} while (read_value & 0x02);	
+	} while (read_value & 0x02);
 	
 	isx005_msg(&client->dev, "Using HD preview\n");
 
-	return err;	
+	return err;
 }
 
 static int isx005_set_preview_start(struct v4l2_subdev *sd)
@@ -1114,23 +1080,34 @@ static int isx005_set_preview_start(struct v4l2_subdev *sd)
 	
 	int err = 0, timeout_cnt = 0;
 	unsigned short read_value = 0x00;
-	int i = 0;
 
 	/* Reset the AF check variables for the next sequence */
 	stop_af_operation = 0;
 	af_operation_status = 0;
-
-//af_status_check = 0;//100815 af is not running
 
 	if (!state->pix.width || !state->pix.height || !state->fps)
 	{
 		return -EINVAL;
 	}
 
-	err = isx005_i2c_write(sd, isx005_cap_to_prev, sizeof(isx005_cap_to_prev) / sizeof(isx005_cap_to_prev[0]),
-				"isx005_cap_to_prev");
+	if(state->runmode == ISX005_RUNMODE_IDLE)
+	{
+		err = isx005_i2c_write(sd, isx005_cap_to_prev, sizeof(isx005_cap_to_prev) / sizeof(isx005_cap_to_prev[0]),
+					"isx005_cap_to_prev");
+		if(err < 0)
+		{
+			dev_err(&client->dev, "%s: failed: Could not change capture to preview\n", __func__);
+			return -EIO;
+		}			
+	}
 				
-	isx005_i2c_read(client, 0x0004, &read_value);
+	err = isx005_i2c_read(client, 0x0004, &read_value);
+	if (err < 0)
+	{
+		dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);
+		return -EIO;
+	}
+
 	if((read_value & 0x03) != 0) 
 	{
 		isx005_i2c_write_multi(client, 0x0011, 0x0000, 1);	//MODE_SEL  0x00: Monitor mode
@@ -1144,7 +1121,7 @@ static int isx005_set_preview_start(struct v4l2_subdev *sd)
 			msleep(1);
 			if (timeout_cnt > 1000) 
 			{
-				dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+				dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 				break;
 			}
 		}while(!(read_value&0x02));
@@ -1153,16 +1130,15 @@ static int isx005_set_preview_start(struct v4l2_subdev *sd)
 		do 
 		{
 			timeout_cnt++;
-			isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-			msleep(1);			
+			isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+			msleep(1);
 			isx005_i2c_read(client, 0x00F8, &read_value);
 			if (timeout_cnt > 1000) 
 			{
-				dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+				dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 				break;
 			}
-		}while(read_value&0x02);	
-
+		}while(read_value&0x02);
 	}
 		
 	err = isx005_set_preview_size(sd);
@@ -1172,29 +1148,25 @@ static int isx005_set_preview_start(struct v4l2_subdev *sd)
 		return -EIO;
 	}
 
-	state->runmode = ISX005_RUNMODE_RUNNING;
-
-	if(state->check_dataline) // Output Test Pattern
+	if(state->set_vhflip == 1)
 	{
-		printk( "pattern on setting~~~~~~~~~~~~~~\n");	
-    	for(i = 0; i <ISX005_PATTERN_ON_REGS; i++)
-    	{
-    		err = isx005_i2c_write_multi(client, isx005_pattern_on[i].subaddr ,  isx005_pattern_on[i].value ,  isx005_pattern_on[i].len);
-    		if (err < 0)
-    		{
-    			dev_err(&client->dev, "%s: %d register write fail\n", __func__, __LINE__);	
-    			return -EIO;
-    		}		
-    	}
-        
-    	msleep(300);
-    	printk( "pattern on setting done~~~~~~~~~~~~~~\n");	
-
+		err = isx005_i2c_write(sd, isx005_vhflip_on,
+						sizeof(isx005_vhflip_on) / sizeof(isx005_vhflip_on[0]), "isx005_vhflip_on");
 	}
 	else
 	{
+			err = isx005_i2c_write(sd, isx005_vhflip_off,
+							sizeof(isx005_vhflip_off) / sizeof(isx005_vhflip_off[0]), "isx005_vhflip_off");
+	}
 
-//100816	msleep(200);
+	if(state->check_dataline) // Output Test Pattern
+	{
+		err = isx005_check_dataline_start(sd);
+	}
+	else
+	{
+		state->runmode = ISX005_RUNMODE_RUNNING;
+
 		if(camera_init == 0) // 100818
 		{
 			camera_init = 1;
@@ -1204,21 +1176,21 @@ static int isx005_set_preview_start(struct v4l2_subdev *sd)
 				timeout_cnt++;
 				msleep(1);
 				isx005_i2c_read(client, 0x6c00, &read_value);
-				if (timeout_cnt > 200) 
+				if (timeout_cnt > 300) 
 				{
-					dev_err(&client->dev, "%s: Entering AE stabilization timed out \n", __func__);	
+					dev_err(&client->dev, "%s: Entering AE stabilization timed out \n", __func__);
 					break;
 				}
 			}while(!(read_value==0));
 		}
 		else if(camera_init == 1)
 		{
-			msleep(200);
+			msleep(300);
 		}
 		first_af_start = 0;
 
-		isx005_msg(&client->dev, "%s: init setting~~~~~~~~~~~~~~\n", __func__);	
-    }
+		isx005_msg(&client->dev, "%s: init setting~~~~~~~~~~~~~~\n", __func__);
+	}
 	return 0;
 }
 
@@ -1230,7 +1202,7 @@ static int isx005_set_capture_size(struct v4l2_subdev *sd)
 	int err = 0;
 	int index = state->framesize_index;
 	
-	isx005_msg(&client->dev, "isx005_set_capture_size ---------index : %d\n", index);	
+	isx005_msg(&client->dev, "isx005_set_capture_size ---------index : %d\n", index);
 
 	switch(index)
 	{
@@ -1244,7 +1216,7 @@ static int isx005_set_capture_size(struct v4l2_subdev *sd)
 			err = isx005_i2c_write_multi(client, 0x0386, 0x0190, 2);// HSIZE_TN - 400
 			err = isx005_i2c_write_multi(client, 0x0024, 0x0400, 2); //HSIZE_CAP 1024
 			err = isx005_i2c_write_multi(client, 0x002A, 0x0258, 2); //VSIZE_CAP 600
-			break;		
+			break;
 			
 		case ISX005_CAPTURE_W1MP: /* 1600x960 */
 			err = isx005_i2c_write_multi(client, 0x0386, 0x0190, 2);// HSIZE_TN - 400
@@ -1284,7 +1256,7 @@ static int isx005_set_capture_size(struct v4l2_subdev *sd)
 		return -EIO; 
 	}
 
-	return 0;	
+	return 0;
 }
 
 static int isx005_set_jpeg_quality(struct v4l2_subdev *sd)
@@ -1361,7 +1333,7 @@ static int isx005_get_snapshot_data(struct v4l2_subdev *sd)
 
 		state->jpeg.main_offset = 0;
 		state->jpeg.thumb_offset = 0x271000;
-		state->jpeg.postview_offset = 0x280A00;		
+		state->jpeg.postview_offset = 0x280A00;
 	}
 
 	isx005_msg(&client->dev, "%s: done\n", __func__);
@@ -1371,7 +1343,7 @@ static int isx005_get_snapshot_data(struct v4l2_subdev *sd)
 
 static int isx005_get_LowLightCondition(struct v4l2_subdev *sd, int *Result)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);	
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	
 	int err = 0;
 	unsigned short read_value = 0;
@@ -1409,7 +1381,7 @@ static int isx005_get_LowLightCondition(struct v4l2_subdev *sd, int *Result)
 
 static int isx005_LowLightCondition_Off(struct v4l2_subdev *sd)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);	
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
 	int err = 0;
 
@@ -1419,7 +1391,7 @@ static int isx005_LowLightCondition_Off(struct v4l2_subdev *sd)
 	err = isx005_i2c_write(sd, \
 		isx005_Outdoor_Off, \
 		sizeof(isx005_Outdoor_Off) / sizeof(isx005_Outdoor_Off[0]), \
-		"isx005_Outdoor_Off");	
+		"isx005_Outdoor_Off");
 	if(err < 0)
 	{
 		dev_err(&client->dev, "%s: failed: i2c_write for low_light Condition\n", __func__);
@@ -1432,19 +1404,19 @@ static int isx005_LowLightCondition_Off(struct v4l2_subdev *sd)
 
 		if(gCurrentScene == SCENE_MODE_NIGHTSHOT)
 		{
-			isx005_msg(&client->dev,"SCENE_MODE_NIGHTSHOT --- isx005_Night_Mode_Off: start \n");		
+			isx005_msg(&client->dev,"SCENE_MODE_NIGHTSHOT --- isx005_Night_Mode_Off: start \n");
 			err = isx005_i2c_write(sd, \
 				isx005_Night_Mode_Off, \
 				sizeof(isx005_Night_Mode_Off) / sizeof(isx005_Night_Mode_Off[0]), \
-				"isx005_Night_Mode_Off");	
+				"isx005_Night_Mode_Off");
 		}
 		else
 		{
-			isx005_msg(&client->dev,"Not Night mode --- isx005_Low_Cap_Off: start \n");			
+			isx005_msg(&client->dev,"Not Night mode --- isx005_Low_Cap_Off: start \n");
 			err = isx005_i2c_write(sd, \
 				isx005_Low_Cap_Off, \
 				sizeof(isx005_Low_Cap_Off) / sizeof(isx005_Low_Cap_Off[0]), \
-				"isx005_Low_Cap_Off");			
+				"isx005_Low_Cap_Off");
 		}
 	}
 
@@ -1460,7 +1432,7 @@ static int isx005_LowLightCondition_Off(struct v4l2_subdev *sd)
 
 static int isx005_get_LowLightCondition_flash (struct v4l2_subdev *sd, int *Result)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);	
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	
 	int err = 0;
 	unsigned short read_value = 0;
@@ -1499,7 +1471,7 @@ static int isx005_get_LowLightCondition_flash (struct v4l2_subdev *sd, int *Resu
 
 static int isx005_get_LowLightCondition_iso (struct v4l2_subdev *sd, int *Result)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);	
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	
 	int err = 0;
 	unsigned int read_value = 0;
@@ -1520,7 +1492,6 @@ static int isx005_get_LowLightCondition_iso (struct v4l2_subdev *sd, int *Result
 		{
 			*Result = 1; //gLowLight
 		}
-	
 	}
 	else if(gIsoCondition == 3)//ISO 200
 	{
@@ -1528,7 +1499,6 @@ static int isx005_get_LowLightCondition_iso (struct v4l2_subdev *sd, int *Result
 		{
 			*Result = 1; //gLowLight
 		}
-	
 	}	
 	else if(gIsoCondition == 4)//ISO 400
 	{
@@ -1536,11 +1506,10 @@ static int isx005_get_LowLightCondition_iso (struct v4l2_subdev *sd, int *Result
 		{
 			*Result = 1; //gLowLight
 		}
-	
 	}
 	else
 	{
-		dev_err(&client->dev, "%s: unsupported iso(%d) value.\n", __func__, gIsoCondition);	
+		dev_err(&client->dev, "%s: unsupported iso(%d) value.\n", __func__, gIsoCondition);
 	}
 	isx005_msg(&client->dev,"isx005_get_LowLightCondition_iso : end \n");
 
@@ -1553,36 +1522,164 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 
 	int err = 0, timeout_cnt = 0;
 	unsigned short read_value = 0;
+
+	/* Check low light condition */
+	gLowLight_flash = 0;
+	if(gIsoCondition == 0)
+	{
+		isx005_get_LowLightCondition_flash(sd, &gLowLight_flash);
+	}
+	else
+	{
+		isx005_get_LowLightCondition_iso(sd, &gLowLight_flash);
+	}
+		
+	gLowLight_flash_second = gLowLight_flash;
+
+	/* Go to Half release mode */
+	isx005_i2c_read(client, 0x0011, &read_value);
+	if ((read_value & 0xFF) != 0x01) 
+	{
+		switch(flash_mode)
+		{
+			case FLASHMODE_AUTO:
+				if (gLowLight_flash)
+				{
+					isx005_flash_set_first(sd);
+					isx005_i2c_write(sd, isx005_half_release_with_flash, sizeof(isx005_half_release_with_flash) / sizeof(isx005_half_release_with_flash[0]),"isx005_half_release_with_flash");
+				}
+				break;
+
+			case FLASHMODE_ON:
+				isx005_flash_set_first(sd);
+				isx005_i2c_write(sd, isx005_half_release_with_flash, sizeof(isx005_half_release_with_flash) / sizeof(isx005_half_release_with_flash[0]),"isx005_half_release_with_flash");
+				break;
+
+			case FLASHMODE_OFF:
+				break;
+
+			default:
+				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__); 
+				break;
+		}
+
+		/* Wait for Mode Transition (CM) */
+		timeout_cnt = 0;
+		do 
+		{
+			timeout_cnt++;
+			isx005_i2c_read(client, 0x00F8, &read_value);
+			msleep(1);
+			if (timeout_cnt > 1000) 
+			{
+				dev_err(&client->dev, "%s: Entering Half release mode timed out \n", __func__); 
+				break;
+			}
+		} while (!(read_value & 0x02));
+
+		timeout_cnt = 0;
+		do 
+		{
+			timeout_cnt++;
+			isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+			msleep(1);
+			isx005_i2c_read(client, 0x00F8, &read_value);
+			if (timeout_cnt > 1000) 
+			{
+				dev_err(&client->dev, "%s: Entering Half release mode timed out \n", __func__); 
+				break;
+			}
+		} while (read_value & 0x02);
+	} 
+
+	/* Half flash on/off */
+	switch(flash_mode)
+	{
+		case FLASHMODE_AUTO:
+			//when lowlight
+			if (gLowLight_flash)
+			{
+				isx005_flash(15, sd);//Half flash
+				//Wait for AE/AWB complete
+				do {
+					isx005_i2c_read(client, HALF_MOVE_STS, &a_sts );
+					if ( a_sts == 0 )
+						break;
+					msleep(1);		//1ms sleep
+				}while(timeout_cnt++ < 200);
+			}
+			break;
+
+		case FLASHMODE_ON:
+			isx005_flash(15, sd);
+			//Wait for AE/AWB complete
+			do {
+				isx005_i2c_read(client, HALF_MOVE_STS, &a_sts );
+				if ( a_sts == 0 )
+					break;
+				msleep(1);		//1ms sleep
+			}while(timeout_cnt++ < 200);
+			break;
+
+		case FLASHMODE_OFF:
+			break;
+
+		default:
+			dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__); 
+			break;
+	}
+
+	switch(flash_mode)
+	{
+		case FLASHMODE_AUTO:
+			//when lowlight
+			if (gLowLight_flash)
+			{
+				isx005_flash_set_second(sd);
+			}
+			break;
+
+		case FLASHMODE_ON:
+			isx005_flash_set_second(sd);
+			break;
+
+		case FLASHMODE_OFF:
+			break;
+		default:
+			dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);
+			break;
+	}	
+	
+	//get light value
 	flash_check = 0;
 
 	if(gCurrentScene != SCENE_MODE_NIGHTSHOT) //scene mode is not NIGHTSHOT
 	{
-		isx005_flash(0, sd);//Flash off
+		isx005_flash(0, sd);//Pre Flash off
+		flash_check = 0;
 		switch(flash_mode)
 		{
 			case FLASHMODE_AUTO:
-				//get light value
-				flash_check = 0;
 				if (gLowLight_flash)
 				{
-					isx005_flash(1, sd);//Flash on
+					//Flash on
+					isx005_flash(1, sd);//Main Flash on
 					flash_check = 1;
 				}
-				//FLASH OFF
 				break;
-				
+
 			case FLASHMODE_ON:
 				//Flash on
-				isx005_flash(1, sd);
+				isx005_flash(1, sd);//Main Flash on
 				flash_check = 1;
 				break;
-				
+
 			case FLASHMODE_OFF:
 				flash_check = 0;
 				break;
-				
+
 			default:
-				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
+				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);
 				break;
 		}
 	}
@@ -1595,7 +1692,7 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 	err = isx005_i2c_write(sd, \
 		isx005_prev_to_cap, \
 		sizeof(isx005_prev_to_cap) / sizeof(isx005_prev_to_cap[0]), \
-		"isx005_prev_to_cap");	
+		"isx005_prev_to_cap");
 	if(err < 0)
 	{
 		dev_err(&client->dev, "%s: failed: isx005_prev_to_cap\n", __func__);
@@ -1604,14 +1701,14 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 
 	/* Outdoor setting */
 	isx005_i2c_read(client, 0x6C21, &read_value);
-	isx005_msg(&client->dev, "%s: i2c_read ---  OUTDOOR_F == 0x%x \n", __func__, read_value);	
+	isx005_msg(&client->dev, "%s: i2c_read ---  OUTDOOR_F == 0x%x \n", __func__, read_value);
 	if(read_value == 0x01)
 	{
 		isx005_i2c_write_multi(client, 0x0014, 0x0003, 1);/*CAPNUM is setted 3. default value is 2. */
 		err = isx005_i2c_write(sd, \
 			isx005_Outdoor_On, \
 			sizeof(isx005_Outdoor_On) / sizeof(isx005_Outdoor_On[0]), \
-			"isx005_Outdoor_On");		
+			"isx005_Outdoor_On");
 		if(err < 0)
 		{
 			dev_err(&client->dev, "%s: failed: isx005_Outdoor_On\n", __func__);
@@ -1635,7 +1732,7 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 			err = isx005_i2c_write(sd, \
 				isx005_Night_Mode_On, \
 				sizeof(isx005_Night_Mode_On) / sizeof(isx005_Night_Mode_On[0]), \
-				"isx005_Night_Mode_On");	
+				"isx005_Night_Mode_On");
 			if(err < 0)
 			{
 				dev_err(&client->dev, "%s: failed: isx005_Night_Mode_On\n", __func__);
@@ -1688,7 +1785,7 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 		msleep(1);
 		if (timeout_cnt > 1000) 
 		{
-			dev_err(&client->dev, "%s: Entering capture mode timed out\n", __func__);	
+			dev_err(&client->dev, "%s: Entering capture mode timed out\n", __func__);
 			break;
 		}
 	}while(!(read_value&0x02));
@@ -1697,18 +1794,18 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 	do 
 	{
 		timeout_cnt++;
-		isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-		msleep(1);			
+		isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+		msleep(1);
 		isx005_i2c_read(client, 0x00F8, &read_value);
 		if (timeout_cnt > 1000) 
 		{
-			dev_err(&client->dev, "%s: Entering capture mode timed out\n", __func__);	
+			dev_err(&client->dev, "%s: Entering capture mode timed out\n", __func__);
 			break;
 		}
-	}while(read_value&0x02);	
+	}while(read_value&0x02);
 
 	//capture frame out....
-	isx005_msg(&client->dev, "%s: Capture frame out~~~~ \n", __func__);	
+	isx005_msg(&client->dev, "%s: Capture frame out~~~~ \n", __func__);
 	msleep(50);
 
 	timeout_cnt = 0;
@@ -1716,30 +1813,30 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 	{
 		timeout_cnt++;
 		isx005_i2c_read(client, 0x00F8, &read_value);
-		msleep(1);		
+		msleep(1);
 		if (timeout_cnt > 1000) 
 		{
-			dev_err(&client->dev, "%s: JPEG capture timed out\n", __func__);	
+			dev_err(&client->dev, "%s: JPEG capture timed out\n", __func__);
 			break;
 		}
-	}while(!(read_value&0x08));	
+	}while(!(read_value&0x08));
 
 	timeout_cnt = 0;
 	do 
 	{
 		timeout_cnt++;
-		isx005_i2c_write_multi(client, 0x00FC, 0x0008, 1);	
+		isx005_i2c_write_multi(client, 0x00FC, 0x0008, 1);
 		msleep(1);
 		isx005_i2c_read(client, 0x00F8, &read_value);
 		if (timeout_cnt > 1000) 
 		{
-			dev_err(&client->dev, "%s: JPEG capture timed out\n", __func__);	
+			dev_err(&client->dev, "%s: JPEG capture timed out\n", __func__);
 			break;
 		}
-	}while(read_value&0x08);	
+	}while(read_value&0x08);
 
 	isx005_i2c_read(client, 0x0200, &read_value);
-	isx005_msg(&client->dev, "%s: JPEG STS --- read_value == 0x%x \n", __func__, read_value);			
+	isx005_msg(&client->dev, "%s: JPEG STS --- read_value == 0x%x \n", __func__, read_value);
 
 
 	/*
@@ -1766,17 +1863,17 @@ static int isx005_set_capture_start(struct v4l2_subdev *sd, struct v4l2_control 
 				}
 				//when state is FLASH OFF, don't anything for FLASH MODE
 				break;
-				
+
 			case FLASHMODE_ON:
 				isx005_flash(0, sd);//Flash OFF
 				isx005_flash_end_capture(sd);
 				break;
-				
+
 			case FLASHMODE_OFF:
 				break;
-				
+
 			default:
-				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
+				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);
 				break;
 		}
 	}
@@ -1804,99 +1901,99 @@ static int isx005_change_scene_mode(struct v4l2_subdev *sd, struct v4l2_control 
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Default, \
 				sizeof(isx005_Scene_Default) / sizeof(isx005_Scene_Default[0]), \
-				"isx005_Scene_Default");			
+				"isx005_Scene_Default");
 			break;
 
 		case SCENE_MODE_PORTRAIT:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Portrait, \
 				sizeof(isx005_Scene_Portrait) / sizeof(isx005_Scene_Portrait[0]), \
-				"isx005_Scene_Portrait");			
+				"isx005_Scene_Portrait");
 			break;
 
 		case SCENE_MODE_NIGHTSHOT:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Nightshot, \
 				sizeof(isx005_Scene_Nightshot) / sizeof(isx005_Scene_Nightshot[0]), \
-				"isx005_Scene_Nightshot");			
+				"isx005_Scene_Nightshot");
 			break;
 
 		case SCENE_MODE_BACK_LIGHT:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Backlight, \
 				sizeof(isx005_Scene_Backlight) / sizeof(isx005_Scene_Backlight[0]), \
-				"isx005_Scene_Backlight");			
+				"isx005_Scene_Backlight");
 			break;
 
 		case SCENE_MODE_LANDSCAPE:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Landscape, \
 				sizeof(isx005_Scene_Landscape) / sizeof(isx005_Scene_Landscape[0]), \
-				"isx005_Scene_Landscape");			
+				"isx005_Scene_Landscape");
 			break;
 
 		case SCENE_MODE_SPORTS:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Sports, \
 				sizeof(isx005_Scene_Sports) / sizeof(isx005_Scene_Sports[0]), \
-				"isx005_Scene_Sports");			
+				"isx005_Scene_Sports");
 			break;
 
 		case SCENE_MODE_PARTY_INDOOR:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Party_Indoor, \
 				sizeof(isx005_Scene_Party_Indoor) / sizeof(isx005_Scene_Party_Indoor[0]), \
-				"isx005_Scene_Party_Indoor");			
+				"isx005_Scene_Party_Indoor");
 			break;
 
 		case SCENE_MODE_BEACH_SNOW:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Beach_Snow, \
 				sizeof(isx005_Scene_Beach_Snow) / sizeof(isx005_Scene_Beach_Snow[0]), \
-				"isx005_Scene_Beach_Snow");			
+				"isx005_Scene_Beach_Snow");
 			break;
 
 		case SCENE_MODE_SUNSET:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Sunset, \
 				sizeof(isx005_Scene_Sunset) / sizeof(isx005_Scene_Sunset[0]), \
-				"isx005_Scene_Sunset");			
+				"isx005_Scene_Sunset");
 			break;
 
 		case SCENE_MODE_DUST_DAWN:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Duskdawn, \
 				sizeof(isx005_Scene_Duskdawn) / sizeof(isx005_Scene_Duskdawn[0]), \
-				"isx005_Scene_Duskdawn");			
+				"isx005_Scene_Duskdawn");
 			break;
 
 		case SCENE_MODE_FALL_COLOR:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Fall_Color, \
 				sizeof(isx005_Scene_Fall_Color) / sizeof(isx005_Scene_Fall_Color[0]), \
-				"isx005_Scene_Fall_Color");			
+				"isx005_Scene_Fall_Color");
 			break;
 
 		case SCENE_MODE_FIREWORKS:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Fireworks, \
 				sizeof(isx005_Scene_Fireworks) / sizeof(isx005_Scene_Fireworks[0]), \
-				"isx005_Scene_Fireworks");			
-			break;		
+				"isx005_Scene_Fireworks");
+			break;
 
 		case SCENE_MODE_TEXT:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Text, \
 				sizeof(isx005_Scene_Text) / sizeof(isx005_Scene_Text[0]), \
-				"isx005_Scene_Text");			
-			break;	
+				"isx005_Scene_Text");
+			break;
 
 		case SCENE_MODE_CANDLE_LIGHT:
 			err = isx005_i2c_write(sd, \
 				isx005_Scene_Candle_Light, \
 				sizeof(isx005_Scene_Candle_Light) / sizeof(isx005_Scene_Candle_Light[0]), \
-				"isx005_Scene_Candle_Light");			
-			break;			
+				"isx005_Scene_Candle_Light");
+			break;
 			
 		default:
 			dev_err(&client->dev, "%s: unsupported scene(%d) mode\n", __func__, ctrl->value);
@@ -1909,7 +2006,7 @@ static int isx005_change_scene_mode(struct v4l2_subdev *sd, struct v4l2_control 
 		return -EIO;
 	}
 	
-	gCurrentScene = ctrl->value;	
+	gCurrentScene = ctrl->value;
 	
 	isx005_msg(&client->dev, "%s: done   CurrentScene : %d, Scene : %d\n", __func__, gCurrentScene, ctrl->value);
 	
@@ -1974,35 +2071,35 @@ static int isx005_set_saturation(struct v4l2_subdev *sd, struct v4l2_control *ct
 			err = isx005_i2c_write(sd, \
 				isx005_Saturation_Minus_2, \
 				sizeof(isx005_Saturation_Minus_2) / sizeof(isx005_Saturation_Minus_2[0]), \
-				"isx005_Saturation_Minus_2");	
+				"isx005_Saturation_Minus_2");
 			break;
 
 		case SATURATION_MINUS_1:
 			err = isx005_i2c_write(sd, \
 				isx005_Saturation_Minus_1, \
 				sizeof(isx005_Saturation_Minus_1) / sizeof(isx005_Saturation_Minus_1[0]), \
-				"isx005_Saturation_Minus_1");	
+				"isx005_Saturation_Minus_1");
 			break;
 
 		case SATURATION_DEFAULT:
 			err = isx005_i2c_write(sd, \
 				isx005_Saturation_Default, \
 				sizeof(isx005_Saturation_Default) / sizeof(isx005_Saturation_Default[0]), \
-				"isx005_Saturation_Default");	
+				"isx005_Saturation_Default");
 			break;
 
 		case SATURATION_PLUS_1:
 			err = isx005_i2c_write(sd, \
 				isx005_Saturation_Plus_1, \
 				sizeof(isx005_Saturation_Plus_1) / sizeof(isx005_Saturation_Plus_1[0]), \
-				"isx005_Saturation_Plus_1");	
+				"isx005_Saturation_Plus_1");
 			break;
 
 		case SATURATION_PLUS_2:
 			err = isx005_i2c_write(sd, \
 				isx005_Saturation_Plus_2, \
 				sizeof(isx005_Saturation_Plus_2) / sizeof(isx005_Saturation_Plus_2[0]), \
-				"isx005_Saturation_Plus_2");	
+				"isx005_Saturation_Plus_2");
 			break;
 		
 		default:
@@ -2033,40 +2130,40 @@ static int isx005_set_contrast(struct v4l2_subdev *sd, struct v4l2_control *ctrl
 			err = isx005_i2c_write(sd, \
 				isx005_Contrast_Minus_2, \
 				sizeof(isx005_Contrast_Minus_2) / sizeof(isx005_Contrast_Minus_2[0]), \
-				"isx005_Contrast_Minus_2");	
+				"isx005_Contrast_Minus_2");
 			break;
 
 		case CONTRAST_MINUS_1:
 			err = isx005_i2c_write(sd, \
 				isx005_Contrast_Minus_1, \
 				sizeof(isx005_Contrast_Minus_1) / sizeof(isx005_Contrast_Minus_1[0]), \
-				"isx005_Contrast_Minus_1");	
+				"isx005_Contrast_Minus_1");
 			break;
 
 		case CONTRAST_DEFAULT:
 			err = isx005_i2c_write(sd, \
 				isx005_Contrast_Default, \
 				sizeof(isx005_Contrast_Default) / sizeof(isx005_Contrast_Default[0]), \
-				"isx005_Contrast_Default");	
+				"isx005_Contrast_Default");
 			break;
 
 		case CONTRAST_PLUS_1:
 			err = isx005_i2c_write(sd, \
 				isx005_Contrast_Plus_1, \
 				sizeof(isx005_Contrast_Plus_1) / sizeof(isx005_Contrast_Plus_1[0]), \
-				"isx005_Contrast_Plus_1");	
+				"isx005_Contrast_Plus_1");
 			break;
 
 		case CONTRAST_PLUS_2:
 			err = isx005_i2c_write(sd, \
 				isx005_Contrast_Plus_2, \
 				sizeof(isx005_Contrast_Plus_2) / sizeof(isx005_Contrast_Plus_2[0]), \
-				"isx005_Contrast_Plus_2");	
+				"isx005_Contrast_Plus_2");
 			break;
 
 		default:
 			dev_err(&client->dev, "%s: unsupported contrast(%d) value.\n", __func__, ctrl->value);
-			break;			
+			break;
 	}
 
 	if(err < 0)
@@ -2092,40 +2189,40 @@ static int isx005_set_sharpness(struct v4l2_subdev *sd, struct v4l2_control *ctr
 			err = isx005_i2c_write(sd, \
 				isx005_Sharpness_Minus_2, \
 				sizeof(isx005_Sharpness_Minus_2) / sizeof(isx005_Sharpness_Minus_2[0]), \
-				"isx005_Sharpness_Minus_2");	
+				"isx005_Sharpness_Minus_2");
 			break;
 
 		case SHARPNESS_MINUS_1:
 			err = isx005_i2c_write(sd, \
 				isx005_Sharpness_Minus_1, \
 				sizeof(isx005_Sharpness_Minus_1) / sizeof(isx005_Sharpness_Minus_1[0]), \
-				"isx005_Sharpness_Minus_1");	
+				"isx005_Sharpness_Minus_1");
 			break;
 
 		case SHARPNESS_DEFAULT:
 			err = isx005_i2c_write(sd, \
 				isx005_Sharpness_Default, \
 				sizeof(isx005_Sharpness_Default) / sizeof(isx005_Sharpness_Default[0]), \
-				"isx005_Sharpness_Default");	
+				"isx005_Sharpness_Default");
 			break;
 
 		case SHARPNESS_PLUS_1:
 			err = isx005_i2c_write(sd, \
 				isx005_Sharpness_Plus_1, \
 				sizeof(isx005_Sharpness_Plus_1) / sizeof(isx005_Sharpness_Plus_1[0]), \
-				"isx005_Sharpness_Plus_1");	
+				"isx005_Sharpness_Plus_1");
 			break;
 
 		case SHARPNESS_PLUS_2:
 			err = isx005_i2c_write(sd, \
 				isx005_Sharpness_Plus_2, \
 				sizeof(isx005_Sharpness_Plus_2) / sizeof(isx005_Sharpness_Plus_2[0]), \
-				"isx005_Sharpness_Plus_2");	
+				"isx005_Sharpness_Plus_2");
 			break;
 
 		default:
 			dev_err(&client->dev, "%s: unsupported sharpness(%d) value.\n", __func__, ctrl->value);
-			break;			
+			break;
 	}
 
 	if(err < 0)
@@ -2150,17 +2247,17 @@ static int isx005_set_sensor_mode(struct v4l2_subdev *sd, struct v4l2_control *c
 	
 	if (ctrl->value == 1) 
 	{
-		printk("%s, isx005_camcorder_on\n", __func__);	
+		printk("%s, isx005_camcorder_on\n", __func__);
 		err = isx005_i2c_write(sd, \
 			isx005_camcorder_on, \
 			sizeof(isx005_camcorder_on) / sizeof(isx005_camcorder_on[0]), \
 			"isx005_camcorder_on");
-		msleep(200);
 		if (err < 0) 
 		{
 			dev_err(&client->dev, "%s: failed: i2c_write for set_sensor_mode %d\n", __func__, ctrl->value);
 			return -EIO;
 		}
+		msleep(200);
 	}
 	else if (ctrl->value == 2)
 	{
@@ -2181,11 +2278,13 @@ static int isx005_set_focus_mode(struct v4l2_subdev *sd, struct v4l2_control *ct
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int err = 0;
+	int timeout_cnt = 0;
+	unsigned short read_value = 0;
 
 	switch(ctrl->value) 
 	{
 		case FOCUS_MODE_MACRO:
-			isx005_msg(&client->dev, "%s: FOCUS_MODE_MACRO \n", __func__);	
+			isx005_msg(&client->dev, "%s: FOCUS_MODE_MACRO \n", __func__);
 			err = isx005_i2c_write(sd, isx005_AF_Macro_mode, ISX005_AF_MACRO_MODE_REGS, "isx005_AF_Macro_mode");
 			if (err < 0) 
 			{
@@ -2199,7 +2298,7 @@ static int isx005_set_focus_mode(struct v4l2_subdev *sd, struct v4l2_control *ct
 			break;
 			
 		case FOCUS_MODE_AUTO:
-			isx005_msg(&client->dev, "%s: FOCUS_MODE_AUTO \n", __func__);	
+			isx005_msg(&client->dev, "%s: FOCUS_MODE_AUTO \n", __func__);
 			err = isx005_i2c_write(sd, isx005_AF_Normal_mode, ISX005_AF_NORMAL_MODE_REGS, "isx005_AF_Normal_mode");
 			if (err < 0) 
 			{
@@ -2211,8 +2310,19 @@ static int isx005_set_focus_mode(struct v4l2_subdev *sd, struct v4l2_control *ct
 
 		default:
 			dev_err(&client->dev, "%s: unsupported focus(%d) value.\n", __func__, ctrl->value);
-			break;			
+			break;
 	}
+
+	timeout_cnt = 0;
+	do {			
+		isx005_i2c_read(client, 0x6D76, &read_value);
+		isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);
+		msleep(1);
+		if (timeout_cnt++ > 1000)
+		{
+			break;
+		}
+	} while(!((read_value & 0xFF) == 0x03));
 
 	return 0;
 }
@@ -2345,15 +2455,13 @@ static int isx005_set_ev(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 				isx005_EV_Plus_4, \
 				sizeof(isx005_EV_Plus_4) / sizeof(isx005_EV_Plus_4[0]), \
 				"isx005_EV_Plus_4");
-			break;			
+			break;
 
 		default:
 			dev_err(&client->dev, "%s: unsupported ev(%d) value.\n", __func__, ctrl->value);
 			break;
 	}
 
-	//printk("isx005_set_ev: set_ev:, data: 0x%02x\n", isx005_buf_set_ev[1]);
-	
 	if(err < 0)
 	{
 		dev_err(&client->dev, "%s: failed: i2c_write for set_ev\n", __func__);
@@ -2472,15 +2580,14 @@ static DEFINE_MUTEX(af_cancel_op);
 static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct isx005_state *state = to_state(sd);
 
 	int err = 0;
-	unsigned short read_value = 0;
 	int timeout_cnt = 0;
 	int stop_af_temp;
+	unsigned short read_value = 0;
 
-	isx005_msg(&client->dev, "%s: Do AF Behavior~~~~~~~ , %d\n", __func__, ctrl->value);		
-//	err = isx005_get_LowLightCondition(sd, &gLowLight);
+	isx005_msg(&client->dev, "%s: Do AF Behavior~~~~~~~ , %d\n", __func__, ctrl->value);
+	
 	/*
 	 * ctrl -> value can be 0, 1, 2
 	 *
@@ -2490,24 +2597,57 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 	 */
 	if (ctrl->value == 1) 
 	{
+		first_af_start = 1;
+		
+		if (af_operation_status == 1)
+			return 0;
+		else
+			af_operation_status = 0;
+
+		/* Check low light condition */
 		gLowLight_flash = 0;
 		if(gIsoCondition == 0)
 		{
-			err = isx005_get_LowLightCondition_flash(sd, &gLowLight_flash);
+			isx005_get_LowLightCondition_flash(sd, &gLowLight_flash);
 		}
 		else
 		{
-			err = isx005_get_LowLightCondition_iso(sd, &gLowLight_flash);		
+			isx005_get_LowLightCondition_iso(sd, &gLowLight_flash);
 		}
+		
 		gLowLight_flash_second = gLowLight_flash;
-		first_af_start = 1;
-		if (af_operation_status == 1)
-		{
-//100815		stop_af_operation = 0;
-			return 0;
-		}
 
-		af_operation_status = 0;
+		/* Low lux threshold on */
+		switch(flash_mode)
+		{
+			case FLASHMODE_AUTO:
+				isx005_i2c_write_multi(client, 0x480E, 0x0320, 2); //minimum af-opd the value for fir
+				isx005_i2c_write_multi(client, 0x4810, 0x0320, 2); //maximum af-opd the value for fir
+				break;
+				
+			case FLASHMODE_ON:
+				isx005_i2c_write_multi(client, 0x480E, 0x0320, 2); //minimum af-opd the value for fir
+				isx005_i2c_write_multi(client, 0x4810, 0x0320, 2); //maximum af-opd the value for fir	
+				break;
+				
+			case FLASHMODE_OFF:				
+				if (gLowLight_flash) // when over 10dB, flash on
+				{
+					isx005_i2c_write_multi(client, 0x480E, 0x004B, 2); //minimum af-opd the value for fir
+					isx005_i2c_write_multi(client, 0x4810, 0x004B, 2); //maximum af-opd the value for fir		
+				}
+				else
+				{
+					isx005_i2c_write_multi(client, 0x480E, 0x0320, 2); //minimum af-opd the value for fir
+					isx005_i2c_write_multi(client, 0x4810, 0x0320, 2); //maximum af-opd the value for fir		
+				}								
+				break;
+			default:
+				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);
+				break;
+		}
+		
+
 		/* Enter moniter mode if it is some different mode */
 		isx005_i2c_read(client, 0x0011, &read_value);
 		if ((read_value & 0xFF) != 0x00) 
@@ -2523,7 +2663,7 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 				msleep(1);
 				if (timeout_cnt > 1000) 
 				{
-					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 					break;
 				}
 			} while (!(read_value & 0x02));
@@ -2532,18 +2672,15 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 			do 
 			{
 				timeout_cnt++;
-				isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-				msleep(1);			
+				isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+				msleep(1);
 				isx005_i2c_read(client, 0x00F8, &read_value);
 				if (timeout_cnt > 1000) 
 				{
-					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 					break;
 				}
-			} while (read_value & 0x02);	
-
-			/* delay for AE and AWB to settle down */
-//100813			msleep(300);
+			} while (read_value & 0x02);
 		}
 
 		if (af_mode == FOCUS_MODE_MACRO) 
@@ -2551,7 +2688,7 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 			err = isx005_i2c_write(sd, isx005_AF_Return_Macro_pos, ISX005_AF_RETURN_MACRO_POS_REGS, "isx005_AF_Return_Macro_pos");
 			if (err < 0) 
 			{
-				dev_err(&client->dev, "%s: register write fail \n", __func__);	
+				dev_err(&client->dev, "%s: register write fail \n", __func__);
 				return -EIO;
 			}
 		} 
@@ -2560,232 +2697,66 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 			err = isx005_i2c_write(sd, isx005_AF_Return_Inf_pos, ISX005_AF_RETURN_INF_POS_REGS, "isx005_AF_Return_Inf_pos");
 			if (err < 0) 
 			{
-				dev_err(&client->dev, "%s: register write fail \n", __func__);	
+				dev_err(&client->dev, "%s: register write fail \n", __func__);
 				return -EIO;
 			}
 		}
 
+		timeout_cnt = 0;
 		do {
 			isx005_i2c_read(client, 0x6D76, &read_value);
-			isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);		
-		} while(!((read_value & 0xFF) == 0x03));
-
-		switch(flash_mode)
-		{
-			case FLASHMODE_AUTO:
-				isx005_i2c_write_multi(client, 0x480E, 0x0320, 2);//minimum af-opd the value for fir
-				isx005_i2c_write_multi(client, 0x4810, 0x0320, 2);//maximum af-opd the value for fir					
-				if (gLowLight_flash) // when over 10dB, flash on
-				{
-					isx005_flash_set_first(sd);
-				}
-				break;
-			case FLASHMODE_ON:
-				isx005_i2c_write_multi(client, 0x480E, 0x0320, 2);//minimum af-opd the value for fir
-				isx005_i2c_write_multi(client, 0x4810, 0x0320, 2);//maximum af-opd the value for fir					
-				isx005_flash_set_first(sd);
-				break;
-			case FLASHMODE_OFF:
-				if(!(state->set_app))
-				{
-					//High speed AE
-					err = isx005_i2c_write_multi(client, CAP_HALF_AE_CTRL, 0x0005, 1);
-					err = isx005_i2c_write_multi(client, HALF_AWB_CTRL, 0x0001, 1);
-					//Move to Half Rel Mode
-					err = isx005_i2c_write_multi(client, 0x0011, 0x0001, 1);
-				}
-				if (gLowLight_flash) // when over 10dB, flash on
-				{
-					isx005_i2c_write_multi(client, 0x480E, 0x004B, 2);//minimum af-opd the value for fir
-					isx005_i2c_write_multi(client, 0x4810, 0x004B, 2);//maximum af-opd the value for fir					
-				}
-				else
-				{
-					isx005_i2c_write_multi(client, 0x480E, 0x0320, 2);//minimum af-opd the value for fir
-					isx005_i2c_write_multi(client, 0x4810, 0x0320, 2);//maximum af-opd the value for fir					
-				}
-				break;
-			default:
-				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
-				break;
-		}
-
-		/* Go to Half release mode */
-		isx005_i2c_read(client, 0x0011, &read_value);
-		if ((read_value & 0xFF) != 0x01) 
-		{
-			switch(flash_mode)
+			isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);
+			msleep(1);
+			if (timeout_cnt++ > 1000)
 			{
-				case FLASHMODE_AUTO:
-					if (gLowLight_flash)
-					{
-						err = isx005_i2c_write(sd, isx005_half_release_with_flash, sizeof(isx005_half_release_with_flash) / sizeof(isx005_half_release_with_flash[0]),"isx005_half_release_with_flash");
-					}
-					else
-					{
-						err = isx005_i2c_write(sd, isx005_half_release, sizeof(isx005_half_release) / sizeof(isx005_half_release[0]),"isx005_half_release");						
-					}
-					break;
-				case FLASHMODE_ON:
-					err = isx005_i2c_write(sd, isx005_half_release_with_flash, sizeof(isx005_half_release_with_flash) / sizeof(isx005_half_release_with_flash[0]),"isx005_half_release_with_flash");
-					break;
-				case FLASHMODE_OFF:
-					err = isx005_i2c_write(sd, isx005_half_release, sizeof(isx005_half_release) / sizeof(isx005_half_release[0]),"isx005_half_release");
-					break;
-				default:
-					dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
-					break;
+				break;
 			}
+		} while(!((read_value & 0xFF) == 0x03));
+		msleep(200);
 
-
-			/* Wait for Mode Transition (CM) */
-			timeout_cnt = 0;
-			do 
-			{
-				timeout_cnt++;
-				isx005_i2c_read(client, 0x00F8, &read_value);
-				msleep(1);
-				if (timeout_cnt > 1000) 
-				{
-					dev_err(&client->dev, "%s: Entering Half release mode timed out \n", __func__);	
-					break;
-				}
-			} while (!(read_value & 0x02));
-
-				timeout_cnt = 0;
-			do 
-			{
-				timeout_cnt++;
-				isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-				msleep(1);			
-				isx005_i2c_read(client, 0x00F8, &read_value);
-				if (timeout_cnt > 1000) 
-				{
-					dev_err(&client->dev, "%s: Entering Half release mode timed out \n", __func__);	
-					break;
-				}
-			} while (read_value & 0x02);	
-		} 
+		/* Pre flash mode */
 		switch(flash_mode)
 		{
 			case FLASHMODE_AUTO:
-				//when lowlight
 				if (gLowLight_flash)
-				//when FLASH MODE is on
 				{
-//100816					msleep(150);//waiting 1V time
-					isx005_flash(15, sd);//Half flash
+					isx005_i2c_write_multi(client, 0x002F, 0x0003, 1); //Half mode AF off
+					isx005_i2c_write_multi(client, 0x3200, 0x0006, 1); //AE off
+					isx005_flash(15, sd);
 				}
 				break;
+
 			case FLASHMODE_ON:
-				//if lowlight is actived, 1V time is about 150ms, if it's not, that is about 80ms
-#if 0//100816				
-				if (gLowLight_flash)
-					msleep(150);
-				else
-					msleep(80);
-#endif				
-				//waiting 1V time
+				isx005_i2c_write_multi(client, 0x002F, 0x0003, 1); //Half mode AF off
+				isx005_i2c_write_multi(client, 0x3200, 0x0006, 1); //AE off
 				isx005_flash(15, sd);
 				break;
+
 			case FLASHMODE_OFF:
 				break;
+
 			default:
-				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
+				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);
 				break;
 		}
 
-		switch(flash_mode)
-		{
-			case FLASHMODE_AUTO:
-				//when lowlight
-				if (gLowLight_flash) 
-				{
-					//	Wait for AE/AWB complete
-					for(;;) {
-						if (timeout_cnt == 200)
-						{
-							break;
-						}
-						isx005_i2c_read(client, HALF_MOVE_STS, &a_sts );
-	//					dev_err(&client->dev, "%s: AE/AWB STATUS = %d, %d times\n", __func__, a_sts, timeout_cnt);
-						if ( a_sts == 0 )
-							break;
-						msleep(1);	//	1ms sleep
-						timeout_cnt++;
-					}
-				}
-				break;
-			case FLASHMODE_ON:
-				//	Wait for AE/AWB complete
-				for(;;) {
-					if (timeout_cnt == 200)
-					{
-						break; 
-					}
-					isx005_i2c_read(client, HALF_MOVE_STS, &a_sts );
-	//				dev_err(&client->dev, "%s: AE/AWB STATUS = %d, %d times\n", __func__, a_sts, timeout_cnt);
-					if ( a_sts == 0 )
-						break;
-					msleep(1);	//	1ms sleep
-					timeout_cnt++;
-				}
-				break;
-			case FLASHMODE_OFF:
-				break;
-			default:
-				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
-				break;
-		}
+		/* AF start */
+		isx005_msg(&client->dev, "%s: single AF Start command Setting~~~~ \n", __func__); 
 
-#if 0//100813
 		err = isx005_i2c_write(sd, isx005_Single_AF_Start, ISX005_SINGLE_AF_START_REGS, "isx005_Single_AF_Start");
 		if (err < 0) 
 		{
-			dev_err(&client->dev, "%s: register write fail \n", __func__);	
-//problem
-			isx005_flash(0, sd);
-			isx005_flash_end_capture(sd);
-
+			dev_err(&client->dev, "%s: register write fail \n", __func__);
 			return -EIO;
 		}
-#endif
-//100815		af_operation_status = 1;
 	}
 	else if (ctrl->value == 0 && first_af_start) 
 	{
 		mutex_lock(&af_cancel_op);
-//		stop_af_operation = 1;
 		stop_af_operation++;
-
-		switch(flash_mode)
-		{
-			case FLASHMODE_AUTO:
-				if (gLowLight_flash)
-				{
-					isx005_flash(0, sd);
-					isx005_flash_end_capture(sd);
-				}
-				else
-				{
-					isx005_flash(0, sd);					
-				}
-				break;
-			case FLASHMODE_ON:
-				isx005_flash(0, sd);//Flash OFF
-				isx005_flash_end_capture(sd);
-				break;
-			case FLASHMODE_OFF:
-				isx005_flash(0, sd);				
-				break;
-			default:
-				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
-				break;
-		}
 
 		if (af_operation_status == 2) 
 		{
-//			stop_af_operation = 0;
 			stop_af_operation--;
 			if (stop_af_operation < 0)
 			{
@@ -2810,7 +2781,7 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 					msleep(1);
 					if (timeout_cnt > 1000) 
 					{
-						dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+						dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 						break;
 					}
 				} while (!(read_value & 0x02));
@@ -2818,15 +2789,15 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 				do 
 				{
 					timeout_cnt++;
-					isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-					msleep(1);			
+					isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+					msleep(1);
 					isx005_i2c_read(client, 0x00F8, &read_value);
 					if (timeout_cnt > 1000) 
 					{
-						dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+						dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 						break;
 					}
-				} while (read_value & 0x02);	
+				} while (read_value & 0x02);
 			}
 
 			if (af_mode == FOCUS_MODE_MACRO) 
@@ -2834,7 +2805,7 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 				err = isx005_i2c_write(sd, isx005_AF_Return_Macro_pos, ISX005_AF_RETURN_MACRO_POS_REGS, "isx005_AF_Return_Macro_pos");
 				if (err < 0) 
 				{
-					dev_err(&client->dev, "%s: register write fail \n", __func__);	
+					dev_err(&client->dev, "%s: register write fail \n", __func__);
 					mutex_unlock(&af_cancel_op);
 					return -EIO;
 				}
@@ -2844,22 +2815,32 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 				err = isx005_i2c_write(sd, isx005_AF_Return_Inf_pos, ISX005_AF_RETURN_INF_POS_REGS, "isx005_AF_Return_Inf_pos");
 				if (err < 0) 
 				{
-					dev_err(&client->dev, "%s: register write fail \n", __func__);	
+					dev_err(&client->dev, "%s: register write fail \n", __func__);
 					mutex_unlock(&af_cancel_op);
 					return -EIO;
 				}
 			}
+
+			timeout_cnt = 0;
+			do {			
+				isx005_i2c_read(client, 0x6D76, &read_value);
+				isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);
+				msleep(1);
+				if (timeout_cnt++ > 1000)
+				{
+					break;
+				}
+			} while(!((read_value & 0xFF) == 0x03));
 		}
 		mutex_unlock(&af_cancel_op);
 	}
 	else if (ctrl->value == 2 && first_af_start)
 	{
-		isx005_msg(&client->dev, "%s:get AF cancel status start \n", __func__);	
+		isx005_msg(&client->dev, "%s:get AF cancel status start \n", __func__);
 
 		if(!g_ctrl_entered) return 0;
 		timeout_cnt = 0;
 		stop_af_temp = stop_af_operation - 1;
-
 
 		do 
 		{
@@ -2871,24 +2852,15 @@ static int isx005_set_auto_focus(struct v4l2_subdev *sd, struct v4l2_control *ct
 			}
 		} while (stop_af_operation - stop_af_temp && stop_af_operation);
 
-		isx005_msg(&client->dev, "%s:check FF end \n", __func__);	
+		isx005_msg(&client->dev, "%s:check FF end \n", __func__);
 
 		do 
 		{
 			timeout_cnt++;
 			msleep(5);
 			printk("222 stop_af : %d, af_oper : %d\n", stop_af_operation, af_operation_status);
-#if 0 //100815
-			if (timeout_cnt > 20) 
-			{
-				dev_err(&client->dev, "%s:  timed out \n", __func__);	
-				break;
-			}
-#endif
-		} while (af_operation_status == 1);		
-//		} while (stop_af_operation);		
-		isx005_msg(&client->dev, "%s:get AF cancel status end \n", __func__);	
-		isx005_flash(0, sd);
+		} while (af_operation_status == 1);
+		isx005_msg(&client->dev, "%s:get AF cancel status end \n", __func__);
 	}
 
 	return 0;
@@ -2900,8 +2872,7 @@ static int isx005_get_auto_focus_status(struct v4l2_subdev *sd, struct v4l2_cont
 
 	int err = 0, count = 0;
 	int timeout_cnt = 0;
-	unsigned short read_value = 0;		
-
+	unsigned short read_value = 0;
 
 	isx005_msg(&client->dev, "%s: Check AF Result~~~~~~~ , stop af : %d\n", __func__, stop_af_operation);
 	/* If af operation is not started do not perform status check */
@@ -2918,206 +2889,63 @@ static int isx005_get_auto_focus_status(struct v4l2_subdev *sd, struct v4l2_cont
 	/* Check the AF result by polling at 0x6d76 for 0x08*/
 	do 
 	{
-		/* count is used to prevent endless looping here */
-		count++;
-
-		/* Check for AF cancel if af is cancelled stop the operation and return */
 		if (stop_af_operation) 
-		{
-			isx005_msg(&client->dev, "AF is cancelled while doing\n");
+			break;
 
-			isx005_i2c_write_multi(client, 0x4885, 0x0001, 1);
-
-			/* Return to Macro or infinite position */
-			if (af_mode == FOCUS_MODE_MACRO) 
-			{
-				err = isx005_i2c_write(sd, isx005_AF_Return_Macro_pos, ISX005_AF_RETURN_MACRO_POS_REGS, "isx005_AF_Return_Macro_pos");
-				if (err < 0) 
-				{
-					dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
-					return -EIO;
-				}
-			} 
-			else 
-			{
-				err = isx005_i2c_write(sd, isx005_AF_Return_Inf_pos, ISX005_AF_RETURN_INF_POS_REGS, "isx005_AF_Return_Inf_pos");
-				if (err < 0) 
-				{
-					dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
-					return -EIO;
-				}
-			}
-
-			/* Return to moniter mode */
-			isx005_i2c_read(client, 0x0011, &read_value);
-			if ((read_value & 0xFF) != 0x00) 
-			{
-				isx005_i2c_write_multi(client, 0x0011, 0x0000, 1);
-				isx005_i2c_write_multi(client, 0x0012, 0x0001, 1); //Moni_Refresh
-
-				/* Wait for Mode Transition (CM) */
-				timeout_cnt = 0;
-				do 
-				{
-					timeout_cnt++;
-					isx005_i2c_read(client, 0x00F8, &read_value);
-					msleep(1);
-					if (timeout_cnt > 1000) 
-					{
-						dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
-						break;
-					}
-				} while (!(read_value & 0x02));
-
-				timeout_cnt = 0;
-				do 
-				{
-					timeout_cnt++;
-					isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-					msleep(1);			
-					isx005_i2c_read(client, 0x00F8, &read_value);
-					if (timeout_cnt > 1000) {
-						dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
-						break;
-					}
-				} while (read_value & 0x02);	
-			}
-
-			/* Clear AF_LOCK_STS */
-			isx005_i2c_write_multi(client, 0x00FC, 0x0010, 1);
-
-			/*
-			 * Inform user that AF is cancelled
-			 * 0 --> AF failure
-			 * 1 --> AF success
-			 * 2 --> AF cancel
-			 */
-			if (count < 100 && count > 15)
-			{
-				msleep(100);			
-			}
-			else if (count >= 100)
-			{
-				msleep(300);			
-			}
-
-			ctrl->value = 0x02;
-//			stop_af_operation = 0;
-			stop_af_operation--;
-			if (stop_af_operation < 0) 
-				stop_af_operation = 0;
-			af_operation_status = 0;//100815
-			isx005_msg(&client->dev, "AF cancel finished, stop_af : %d\n", stop_af_operation);
-
-			switch(flash_mode)
-			{
-				case FLASHMODE_AUTO:
-					//when lowlight
-					if (gLowLight_flash)
-					{
-						isx005_flash(0, sd);
-						isx005_flash_set_second(sd);
-						//100813 printk(" isx005_flash 0 --- isx005_flash_set_second --FLASHMODE_AUTO\n");//100813
-					}
-					//Turn off the FLASH
-					//set the Exposure/WB for capture with FLASH
-#if 1					
-					else
-					{
-						isx005_flash(0, sd);					
-					}
-#endif					
-					break;
-				case FLASHMODE_ON:
-					isx005_flash(0, sd);//Turn off the FLASH
-					isx005_flash_set_second(sd);
-					 //100813 printk(" isx005_flash 0 --- isx005_flash_set_second --FLASHMODE_ON\n");//100813
-					//set the Exposure/WB for capture with FLASH
-					break;
-				case FLASHMODE_OFF:
-					isx005_flash(0, sd);					
-					break;
-				default:
-					dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
-					break;
-			}
-			g_ctrl_entered = 0;
-
-			return 0;
-		}
-		
 		isx005_i2c_read(client, 0x6D76, &read_value);
-		isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);		
+		isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);
 		msleep(1);
-		if (count > 1000) 
-		{
+		if (count++ > 1000)
+			{
 			ctrl->value = 0x00;	/* 0x00 --> AF failed*/ 
 			break;
-		}
-	}while(!(read_value&0x08));	
+				}
+	}while(!(read_value&0x08));
 
-	mutex_lock(&af_cancel_op);
-	
-	/* Clear AF_LOCK_STS */
-	isx005_i2c_write_multi(client, 0x00FC, 0x0010, 1);
-
-	/* Read AF result */
-	isx005_i2c_read(client, 0x6D77, &read_value);
-	isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);		
-
-	if ((read_value & 0xFF) == 0x01) 
-	{
-		isx005_msg(&client->dev, "%s: AF is success~~~~~~~ , stop_af : %d\n", __func__, stop_af_operation);
-		ctrl->value = 0x01;	/* 0x01 --> AF sucess */ 
-	}
-	else if ((read_value & 0xFF) == 0x00) 
-	{
-		isx005_msg(&client->dev, "%s: AF is Failure~~~~~~~ , stop_af : %d\n", __func__, stop_af_operation);
-		ctrl->value = 0x00;	/* 0x00 --> AF failed*/ 
-	}
-	else
-	{
-		isx005_msg(&client->dev, "%s: Unknown AF Mode~~~~~~~ , stop_af : %d\n", __func__, stop_af_operation);
-	}
-
-
-	switch(flash_mode)
-	{
-		case FLASHMODE_AUTO:
-			//when lowlight
-			if (gLowLight_flash)
-				{
-				isx005_flash_set_second(sd);
-				//100813 printk(" isx005_get_auto_focus_status --- isx005_flash_set_second --FLASHMODE_AUTO\n");//100813
-			}
-			//Turn off the FLASH
-			//set the Exposure/WB for capture with FLASH
-			break;
-		case FLASHMODE_ON:
-			isx005_flash_set_second(sd);
-			//100813 printk(" isx005_get_auto_focus_status --- isx005_flash_set_second--FLASHMODE_ON\n");//100813							
-			//set the Exposure/WB for capture with FLASH
-			break;
-		case FLASHMODE_OFF:
-			break;
-		default:
-			dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__);	
-			break;
-	}
-
-	/* We finished turn off the single AF now */
-	isx005_msg(&client->dev, "%s: single AF Off command Setting~~~~ \n", __func__);	
-
-	err = isx005_i2c_write(sd, isx005_Single_AF_Off, ISX005_SINGLE_AF_OFF_REGS, "isx005_Single_AF_Off");
-	if (err < 0) 
-	{
-		dev_err(&client->dev, "%s: register write fail \n", __func__);	
-		mutex_unlock(&af_cancel_op);
-		return -EIO;
-	}
-#if 1 //100815
+	/* Check for AF cancel if af is cancelled stop the operation and return */
 	if (stop_af_operation) 
 	{
+		/* AF cancel */
+		isx005_i2c_write_multi(client, 0x4885, 0x0001, 1);
+		
+		/* Clear AF_LOCK_STS */
+		isx005_i2c_write_multi(client, 0x00FC, 0x0010, 1);
+
+		/* We finished turn off the single AF now */
+		isx005_msg(&client->dev, "%s: single AF Off command Setting~~~~ \n", __func__);
+
+		err = isx005_i2c_write(sd, isx005_Single_AF_Off, ISX005_SINGLE_AF_OFF_REGS, "isx005_Single_AF_Off");
+		if (err < 0) 
+		{
+			dev_err(&client->dev, "%s: register write fail \n", __func__);
+			mutex_unlock(&af_cancel_op);
+			return -EIO;
+		}
+	
+		/* Flash off */
+		switch(flash_mode)
+		{
+			case FLASHMODE_AUTO:
+				if (gLowLight_flash) // when over 10dB, flash on
+				{
+					isx005_flash(0, sd);
+					isx005_i2c_write_multi(client, 0x3200, 0x0000, 1); //AE on
+				}
+				break;
+				
+			case FLASHMODE_ON:
+				isx005_flash(0, sd);
+				isx005_i2c_write_multi(client, 0x3200, 0x0000, 1); //AE on
+				break;
+				
+			case FLASHMODE_OFF:
+				break;
+				
+			default:
+				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__); 
+				break;
+		}
+		
 		/* Return to moniter mode */
 		isx005_i2c_read(client, 0x0011, &read_value);
 		if ((read_value & 0xFF) != 0x00) 
@@ -3126,7 +2954,7 @@ static int isx005_get_auto_focus_status(struct v4l2_subdev *sd, struct v4l2_cont
 			isx005_i2c_write_multi(client, 0x0012, 0x0001, 1); //Moni_Refresh
 
 			/* Wait for Mode Transition (CM) */
-				timeout_cnt = 0;
+			timeout_cnt = 0;
 			do 
 			{
 				timeout_cnt++;
@@ -3134,23 +2962,23 @@ static int isx005_get_auto_focus_status(struct v4l2_subdev *sd, struct v4l2_cont
 				msleep(1);
 				if (timeout_cnt > 1000) 
 				{
-					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 					break;
 				}
 			} while (!(read_value & 0x02));
 
-				timeout_cnt = 0;
+			timeout_cnt = 0;
 			do 
 			{
 				timeout_cnt++;
-				isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-				msleep(1);			
+				isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+				msleep(1);
 				isx005_i2c_read(client, 0x00F8, &read_value);
 				if (timeout_cnt > 1000) {
-					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 					break;
 				}
-			} while (read_value & 0x02);	
+			} while (read_value & 0x02);
 		}
 
 		/* Return to Macro or infinite position */
@@ -3159,8 +2987,7 @@ static int isx005_get_auto_focus_status(struct v4l2_subdev *sd, struct v4l2_cont
 			err = isx005_i2c_write(sd, isx005_AF_Return_Macro_pos, ISX005_AF_RETURN_MACRO_POS_REGS, "isx005_AF_Return_Macro_pos");
 			if (err < 0) 
 			{
-				dev_err(&client->dev, "%s: register write fail \n", __func__);	
-				mutex_unlock(&af_cancel_op);
+				dev_err(&client->dev, "%s: %d register write fail\n", __func__, __LINE__);
 				return -EIO;
 			}
 		} 
@@ -3169,25 +2996,99 @@ static int isx005_get_auto_focus_status(struct v4l2_subdev *sd, struct v4l2_cont
 			err = isx005_i2c_write(sd, isx005_AF_Return_Inf_pos, ISX005_AF_RETURN_INF_POS_REGS, "isx005_AF_Return_Inf_pos");
 			if (err < 0) 
 			{
-				dev_err(&client->dev, "%s: register write fail \n", __func__);	
-				mutex_unlock(&af_cancel_op);
+				dev_err(&client->dev, "%s: %d register write fail\n", __func__, __LINE__);
 				return -EIO;
-			}	
+			}
 		}
-		ctrl->value = 0x02;
+
+		timeout_cnt = 0;
+		do {			
+			isx005_i2c_read(client, 0x6D76, &read_value);
+			isx005_msg(&client->dev, "%s: i2c_read --- read_value == 0x%x \n", __func__, read_value);
+			msleep(1);
+			if (timeout_cnt++ > 1000)
+			{
+				break;
+			}
+		} while(!((read_value & 0xFF) == 0x03));
+
+			ctrl->value = 0x02;
+
+		if (--stop_af_operation < 0) 
+				stop_af_operation = 0;
+		af_operation_status = 0;
+
+		isx005_msg(&client->dev, "AF cancel finished, stop_af : %d\n", stop_af_operation);
 	}
-#endif
-//	stop_af_operation = 0;
-	stop_af_operation--;
-	if (stop_af_operation < 0)
+	else
 	{
-		stop_af_operation = 0;
-	}
-	af_operation_status = 2;
-	isx005_msg(&client->dev, "%s: single AF check finished~~~~ \n", __func__);	
+		mutex_lock(&af_cancel_op);
 	
-	mutex_unlock(&af_cancel_op);
+		/* Read AF result */
+		isx005_i2c_read(client, 0x6D77, &read_value);
+		if ((read_value & 0xFF) == 0x01) 
+		{
+			isx005_msg(&client->dev, "%s: AF is success~~~~~~~ \n", __func__);
+			ctrl->value = 0x01;	/* 0x01 --> AF sucess */ 
+		}
+		else if ((read_value & 0xFF) == 0x00) 
+		{
+			isx005_msg(&client->dev, "%s: AF is Failure~~~~~~~\n", __func__);
+			ctrl->value = 0x00;	/* 0x00 --> AF failed*/ 
+		}
+		else
+		{
+			isx005_msg(&client->dev, "%s: Unknown AF Mode~~~~~~~\n", __func__);
+		}
+
+		/* Clear AF_LOCK_STS */
+		isx005_i2c_write_multi(client, 0x00FC, 0x0010, 1);
+
+		/* We finished turn off the single AF now */
+		isx005_msg(&client->dev, "%s: single AF Off command Setting~~~~ \n", __func__);
+
+		err = isx005_i2c_write(sd, isx005_Single_AF_Off, ISX005_SINGLE_AF_OFF_REGS, "isx005_Single_AF_Off");
+		if (err < 0) 
+		{
+			dev_err(&client->dev, "%s: register write fail \n", __func__);
+			mutex_unlock(&af_cancel_op);
+			return -EIO;
+		}
+
+		/* Flash off */
+		switch(flash_mode)
+		{
+			case FLASHMODE_AUTO:
+				if (gLowLight_flash) // when over 10dB, flash on
+				{
+					isx005_flash(0, sd);
+					isx005_i2c_write_multi(client, 0x3200, 0x0000, 1); //AE on
+				}
+				break;
+				
+			case FLASHMODE_ON:
+				isx005_flash(0, sd);
+				isx005_i2c_write_multi(client, 0x3200, 0x0000, 1); //AE on
+				break;
+				
+			case FLASHMODE_OFF:
+				break;
+				
+			default:
+				dev_err(&client->dev, "%s: Unknown Flash mode \n", __func__); 
+				break;
+		}
+
+		if (--stop_af_operation < 0)
+			stop_af_operation = 0;
+		af_operation_status = 2;
+
+		mutex_unlock(&af_cancel_op);
+		}
+
 	g_ctrl_entered = 0;
+	
+	isx005_msg(&client->dev, "%s: single AF check finished~~~~ \n", __func__);
 	
 	return 0;
 }
@@ -3196,10 +3097,10 @@ static int isx005_aeawb_unlock(struct v4l2_subdev *sd, struct v4l2_control *ctrl
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	
-	int timeout_cnt = 0;	
-	unsigned short read_value = 0;	
+	int timeout_cnt = 0;
+	unsigned short read_value = 0;
 
-	isx005_msg(&client->dev, "%s: unlocking AE&AWB\n", __func__);	
+	isx005_msg(&client->dev, "%s: unlocking AE&AWB\n", __func__);
 
 	mutex_lock(&af_cancel_op);
 	
@@ -3223,7 +3124,7 @@ static int isx005_aeawb_unlock(struct v4l2_subdev *sd, struct v4l2_control *ctrl
 				msleep(1);
 				if (timeout_cnt > 1000) 
 				{
-					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 					break;
 				}
 			} while (!(read_value & 0x02));
@@ -3232,15 +3133,15 @@ static int isx005_aeawb_unlock(struct v4l2_subdev *sd, struct v4l2_control *ctrl
 			do 
 			{
 				timeout_cnt++;
-				isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);		
-				msleep(1);			
+				isx005_i2c_write_multi(client, 0x00FC, 0x0002, 1);
+				msleep(1);
 				isx005_i2c_read(client, 0x00F8, &read_value);
 				if (timeout_cnt > 1000) 
 				{
-					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);	
+					dev_err(&client->dev, "%s: Entering moniter mode timed out \n", __func__);
 					break;
 				}
-			} while (read_value & 0x02);	
+			} while (read_value & 0x02);
 		}
 	}
 	
@@ -3249,12 +3150,12 @@ static int isx005_aeawb_unlock(struct v4l2_subdev *sd, struct v4l2_control *ctrl
 	return 0;
 }
 
-isx005_get_esd_int(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
+static int isx005_get_esd_int(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	
 	u8 val;
-	int err;
+	int err = 0;
 
 	err = isx005_i2c_read(client, 0x3406, &val); 
 	if(err < 0)
@@ -3320,7 +3221,6 @@ static void isx005_init_parameters(struct v4l2_subdev *sd)
 	state->strm.parm.capture.timeperframe.numerator = 1;
 	state->strm.parm.capture.capturemode = 0;
 
-//	state->framesize_index = ISX005_PREVIEW_SVGA;
 	state->fps = 30; /* Default value */
 	
 	state->jpeg.enable = 0;
@@ -3358,11 +3258,6 @@ const char **isx005_ctrl_get_menu(u32 id)
 {
 	switch (id) 
 	{
-#if 0
-		/* Sample code */
-		case V4L2_CID_WHITE_BALANCE_PRESET:
-			return isx005_querymenu_wb_preset;
-#endif
 		default:
 			return v4l2_ctrl_get_menu(id);
 	}
@@ -3476,7 +3371,8 @@ static int isx005_get_framesize_index(struct v4l2_subdev *sd)
 			/* In case of image capture mode, if the given image resolution is not supported,
  			 * return the next higher image resolution. */
 			if (preview_ratio >= 15)
-			{//must search wide
+			{
+				//must search wide
 				if ((frmsize->width * 10 / frmsize->height) < 15)
 				{
 					continue;
@@ -3528,6 +3424,13 @@ static int isx005_get_framesize_index(struct v4l2_subdev *sd)
 static int isx005_set_flip(struct v4l2_subdev *sd,  struct v4l2_control *ctrl)
 {
 	int err=-1;
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct isx005_state *state = to_state(sd);
+	
+	isx005_msg(&client->dev, "%s: %d\n", __func__, ctrl->value);
+
+	if(state->runmode != ISX005_RUNMODE_RUNNING)
+		return 0;
 
 	if((ctrl->value) == 1)
 	{
@@ -3559,7 +3462,7 @@ static int isx005_set_framesize_index(struct v4l2_subdev *sd, unsigned int index
 	{
 		if(isx005_framesize_list[i].index == index && isx005_framesize_list[i].mode == state->oprmode)
 		{
-			state->framesize_index 	= isx005_framesize_list[i].index;	
+			state->framesize_index 	= isx005_framesize_list[i].index;
 			state->pix.width 		= isx005_framesize_list[i].width;
 			state->pix.height		 = isx005_framesize_list[i].height;
 			isx005_msg(&client->dev, "%s: Camera Res: %dx%d\n", __func__, state->pix.width, state->pix.height);
@@ -3632,9 +3535,9 @@ static int isx005_enum_framesizes(struct v4l2_subdev *sd, \
 					struct v4l2_frmsizeenum *fsize)
 {
 	struct isx005_state *state = to_state(sd);
-	struct isx005_enum_framesize *elem;	
+	struct isx005_enum_framesize *elem;
 	
-	int num_entries = sizeof(isx005_framesize_list)/sizeof(struct isx005_enum_framesize);	
+	int num_entries = sizeof(isx005_framesize_list)/sizeof(struct isx005_enum_framesize);
 	int index = 0;
 	int i = 0;
 
@@ -3774,7 +3677,7 @@ static int isx005_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 	
 	int err = 0;
 
-	printk("%s : control id = 0x%x, %d\n", __func__, ctrl->id, ctrl->id & 0xFF);
+	isx005_msg(&client->dev, "%s : control id = 0x%x, %d\n", __func__, ctrl->id, ctrl->id & 0xFF);
 	
 	switch (ctrl->id) 
 	{
@@ -3884,7 +3787,11 @@ static int isx005_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 		case V4L2_CID_ESD_INT:
 			err = isx005_get_esd_int(sd, ctrl);
 			break;
-
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[
+		case V4L2_CID_CAM_SENSOR_TYPE:
+			err = isx005_check_sensorId(sd);
+			break;
+#endif // VE_GROUP ]]
 		default:
 			dev_err(&client->dev, "%s: no such ctrl\n", __func__);
 			return -ENOIOCTLCMD;
@@ -4003,7 +3910,7 @@ static int isx005_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 			break;
 
 		case V4L2_CID_CAMERA_FACEDETECT_LOCKUNLOCK:
-			break;		
+			break;
 
 		//need to be modified
 		case V4L2_CID_CAM_JPEG_QUALITY:
@@ -4017,7 +3924,7 @@ static int isx005_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 
 		case V4L2_CID_CAMERA_SCENE_MODE:
 			err = isx005_change_scene_mode(sd, ctrl);
-			isx005_msg(&client->dev,"isx005_change_scene_mode = %d \n", ctrl->value);	
+			isx005_msg(&client->dev,"isx005_change_scene_mode = %d \n", ctrl->value);
 			break;
 
 		case V4L2_CID_CAMERA_GPS_LATITUDE:
@@ -4044,7 +3951,7 @@ static int isx005_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 			break;
 			
 		case V4L2_CID_CAMERA_CAF_START_STOP:
-			break;	
+			break;
 
 		case V4L2_CID_CAMERA_OBJECT_POSITION_X:
 			state->position.x = ctrl->value;
@@ -4059,7 +3966,7 @@ static int isx005_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 
 		case V4L2_CID_CAMERA_SET_AUTO_FOCUS:
 			err = isx005_set_auto_focus(sd, ctrl);
-			break;		
+			break;
 
 		case V4L2_CID_CAMERA_FRAME_RATE:
 			err = isx005_set_frame_rate(sd, ctrl);
@@ -4099,17 +4006,17 @@ static int isx005_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
 			break;
 		
 		case V4L2_CID_CAMERA_GET_SHT_TIME:
-			err = isx005_get_shutterspeed(sd, ctrl);		
-			break;	
+			err = isx005_get_shutterspeed(sd, ctrl);
+			break;
 
 		case V4L2_CID_CAMERA_CHECK_DATALINE:
 			state->check_dataline = ctrl->value;
 			err = 0;
-			break;	
+			break;
 
 		case V4L2_CID_CAMERA_CHECK_DATALINE_STOP:
 			err=isx005_check_dataline_stop(sd);
-			break;	
+			break;
 
 		case V4L2_CID_CAMERA_APP_CHECK:
 			state->set_app = ctrl->value;
@@ -4141,17 +4048,17 @@ static int isx005_calibration(struct v4l2_subdev *sd)
 	unsigned long OTP00 = 0, OTP10 = 0;
 	unsigned long OTP0 = 0, OTP1 = 0, OTP2 = 0; //OTPX0, OTPX1, OTPX2
 	unsigned char valid_OPT = 3;
-	unsigned char ret0, ret1;	
+	unsigned char ret0, ret1;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	
 	printk("isx005_calibration : start \n");
 	
 	ret0 = isx005_i2c_read_multi(client, 0x0238, &OTP10);
-	ret1 = isx005_i2c_read_multi(client, 0x022C, &OTP00);	
+	ret1 = isx005_i2c_read_multi(client, 0x022C, &OTP00);
 
 	if(ret0 & ret1)
 	{
-		isx005_msg(&client->dev, "%s [cam] OPT10=0x%lx, OPT00=0x%lx \n", __func__, OTP10,OTP00);	
+		isx005_msg(&client->dev, "%s [cam] OPT10=0x%lx, OPT00=0x%lx \n", __func__, OTP10,OTP00);
 
 		if(((OTP10 & 0x10) >> 4) == 1) 
 		{// CASE1 : READ OPT1 DATA
@@ -4205,7 +4112,7 @@ static int isx005_calibration(struct v4l2_subdev *sd)
 				"isx005_shading_2");
 			if (err < 0)
 			{
-				isx005_msg(&client->dev, "%s: register write fail \n", __func__);	
+				isx005_msg(&client->dev, "%s: register write fail \n", __func__);
 				return -EIO;
 			}		
 	    }
@@ -4217,7 +4124,7 @@ static int isx005_calibration(struct v4l2_subdev *sd)
 				"isx005_shading_3");
 			if (err < 0)
 			{
-				isx005_msg(&client->dev, "%s: register write fail \n", __func__);	
+				isx005_msg(&client->dev, "%s: register write fail \n", __func__);
 				return -EIO;
 			}		
 	    }
@@ -4229,7 +4136,7 @@ static int isx005_calibration(struct v4l2_subdev *sd)
 				"isx005_shading_1");
 			if (err < 0)
 			{
-				isx005_msg(&client->dev, "%s: register write fail \n", __func__);	
+				isx005_msg(&client->dev, "%s: register write fail \n", __func__);
 				return -EIO;
 			}		
 	    }
@@ -4275,7 +4182,7 @@ static int isx005_calibration(struct v4l2_subdev *sd)
 
 	printk("%s : end \n", __func__); 
 	
-	return TRUE;		
+	return TRUE;
 }
 
 static int  isx005_set_default_calibration(struct v4l2_subdev *sd)
@@ -4291,24 +4198,46 @@ static int  isx005_set_default_calibration(struct v4l2_subdev *sd)
 		"isx005_default_calibration");
 	if (err < 0)
 	{
-		dev_err(&client->dev, "%s: register write fail \n", __func__);	
+		dev_err(&client->dev, "%s: register write fail \n", __func__);
 		return -EIO;
 	}  
 	
 	return TRUE;
 }
 
+static int isx005_check_dataline_start(struct v4l2_subdev *sd)
+{
+	int err = -EINVAL, i;
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
+	printk( "pattern on setting~~~~~~~~~~~~~~\n");
+    	for(i = 0; i <ISX005_PATTERN_ON_REGS; i++)
+    	{
+    		err = isx005_i2c_write_multi(client, isx005_pattern_on[i].subaddr ,  isx005_pattern_on[i].value ,  isx005_pattern_on[i].len);
+    		if (err < 0)
+    		{
+    			dev_err(&client->dev, "%s: %d register write fail\n", __func__, __LINE__);
+    			return -EIO;
+    		}		
+    	}
+        
+    	msleep(300);
+	
+	printk( "pattern on setting done~~~~~~~~~~~~~~\n"); 
+
+	return err;
+}
 
 static int isx005_check_dataline_stop(struct v4l2_subdev *sd)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct isx005_state *state = to_state(sd);
 	int err = -EINVAL, i;
+	
       extern int isx005_power_reset(void);
       extern int isx005_cam_stdby(bool en);
 
-	isx005_msg(&client->dev, "pattern off setting~~~~~~~~~~~~~~\n");	
+	isx005_msg(&client->dev, "pattern off setting~~~~~~~~~~~~~~\n");
      
 	err =  isx005_i2c_write_multi(client, 0x3202, 0x00, 1);  //off
 	
@@ -4341,6 +4270,7 @@ static int isx005_check_dataline_stop(struct v4l2_subdev *sd)
 	state->check_dataline = 0;
     
 	mdelay(100);
+	
 	return err;
 }
 
@@ -4356,7 +4286,10 @@ static int isx005_init(struct v4l2_subdev *sd, u32 val)
 #endif
 
 	extern int isx005_cam_stdby(bool en);
-
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[
+	if (!gcamera_sensor_back_checked)
+		return -ENOIOCTLCMD;
+#endif // VE_GROUP ]]
 	printk("%s: init setting~~~~~~~~~~~~~~\n", __func__);
 	
 	isx005_init_parameters(sd);
@@ -4384,7 +4317,7 @@ static int isx005_init(struct v4l2_subdev *sd, u32 val)
 	    isx005_set_default_calibration(sd);
 	}
 
-	isx005_msg(&client->dev, "%s: isx005_init_image_tuning_setting~~~~~~~~~~~~~~\n", __func__);		
+	isx005_msg(&client->dev, "%s: isx005_init_image_tuning_setting~~~~~~~~~~~~~~\n", __func__);
 	isx005_i2c_write(sd, isx005_init_image_tuning_setting, ISX005_INIT_IMAGETUNING_SETTING_REGS, "isx005_init_image_tuning_setting");
 	isx005_msg(&client->dev,"isx005_init\n");
 
@@ -4395,7 +4328,7 @@ static int isx005_init(struct v4l2_subdev *sd, u32 val)
 		err = isx005_i2c_write_multi(client, isx005_init_reg[i].subaddr ,  isx005_init_reg[i].value,  isx005_init_reg[i].len);
 		if (err < 0)
 		{
-			dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
+			dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);
 			return -EIO;
 		}		
 	}
@@ -4410,22 +4343,19 @@ static int isx005_init(struct v4l2_subdev *sd, u32 val)
 	    isx005_set_default_calibration(sd);
 	}
 	
-	printk("%s: isx005_init_image_tuning_setting~~~~~~~~~~~~~~\n", __func__);	
+	printk("%s: isx005_init_image_tuning_setting~~~~~~~~~~~~~~\n", __func__);
 	
 	for(i = 0; i <ISX005_INIT_IMAGETUNING_SETTING_REGS; i++)
 	{
 		err = isx005_i2c_write_multi(client, isx005_init_image_tuning_setting[i].subaddr ,  isx005_init_image_tuning_setting[i].value ,  isx005_init_image_tuning_setting[i].len);
 		if (err < 0)
 		{
-			dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);	
+			dev_err(&client->dev, "%s: %d register read fail\n", __func__, __LINE__);
 			return -EIO;
 		}		
 	}	
 
-//100816	isx005_cam_stdby(TRUE);// standby pin
-	
 #endif	
-//100818	camera_init = 1;
 	//Can use AF Command
 	do
 	{
@@ -4434,14 +4364,14 @@ static int isx005_init(struct v4l2_subdev *sd, u32 val)
 
  		isx005_i2c_read(client, 0x6D76, &read_value_2);
 		isx005_msg(&client->dev, "%s: i2c_read --- read_value_2 == 0x%x \n", __func__, read_value_2);
-		msleep(10);
+		msleep(1);
 		/*
 		 * When the esd error occures during init the while loop never returns
 		 * so keep a count of the loops
 		 */
-		if (count++ > 100)
+		if (count++ > 1000)
 			break;
-	}while((!(read_value_1&0x02))&&(!(read_value_2&0x03)));		
+	}while((!(read_value_1&0x02))&&(!(read_value_2&0x03)));
 	
 	return err;
 }
@@ -4528,6 +4458,18 @@ static const struct v4l2_subdev_ops isx005_ops = {
 	.video = &isx005_video_ops,
 };
 
+
+#ifdef FACTORY_CHECK
+extern ssize_t camtype_show(struct device *dev, struct device_attribute *attr, char *buf);
+extern ssize_t camtype_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size);
+
+static DEVICE_ATTR(camtype,0644, camtype_show, camtype_store);
+
+extern struct class *sec_class;
+extern struct device *sec_cam_dev ;
+#endif
+
+
 /*
  * isx005_probe
  * Fetching platform data is being done with s_config subdev call.
@@ -4549,6 +4491,8 @@ static int isx005_probe(struct i2c_client *client,
 
 	state->runmode = ISX005_RUNMODE_NOTREADY;
 
+	camera_init = 0;
+
 	sd = &state->sd;
 	strcpy(sd->name, ISX005_DRIVER_NAME);
 
@@ -4556,6 +4500,25 @@ static int isx005_probe(struct i2c_client *client,
 	v4l2_i2c_subdev_init(sd, client, &isx005_ops);
 
 	isx005_msg(&client->dev, "3MP camera ISX005 loaded.\n");
+#ifdef FACTORY_CHECK
+{
+	static bool  camtype_init = false;
+	
+	if (sec_cam_dev == NULL)
+	{
+		sec_cam_dev = device_create(sec_class, NULL, 0, NULL, "sec_cam");
+		if (IS_ERR(sec_cam_dev))
+			pr_err("Failed to create device(sec_lcd_dev)!\n");
+	}
+	
+	if (sec_cam_dev != NULL && camtype_init == false)
+	{
+		camtype_init = true;
+		if (device_create_file(sec_cam_dev, &dev_attr_camtype) < 0)
+			pr_err("Failed to create device file(%s)!\n", dev_attr_camtype.attr.name);
+	}
+}
+#endif
 
 	return 0;
 }

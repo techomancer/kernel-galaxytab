@@ -1281,7 +1281,7 @@ static void __s5p_hdmi_audio_i2s_config(
 	/* Configure register related to CUV information */
 	writel((readl(hdmi_base + S5P_HDMI_I2S_CH_ST_0) &
 		~(3<<6 | 7<<3 | 1<<2 | 1<<1 | 1<<0))
-		| (0<<6 | 0<<3 | 0<<2 | 0<<1 | 1<<0),
+		| (0<<6 | 0<<3 | 0<<2 | 0<<1 | 0<<0),
 		hdmi_base + S5P_HDMI_I2S_CH_ST_0);
 	writel((readl(hdmi_base + S5P_HDMI_I2S_CH_ST_1) &
 		~(0xff<<0)) | (0<<0),

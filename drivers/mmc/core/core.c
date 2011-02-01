@@ -1343,6 +1343,10 @@ EXPORT_SYMBOL(mmc_card_adjust_cfg);
 
 #ifdef CONFIG_PM
 
+/* 20101026 SRK - Start */
+int is_mmc_resume = 0;
+EXPORT_SYMBOL(is_mmc_resume);
+/* 20101026 SRK - End */
 /**
  *	mmc_suspend_host - suspend a host
  *	@host: mmc host
@@ -1383,6 +1387,10 @@ int mmc_suspend_host(struct mmc_host *host, pm_message_t state)
 	if (!host->card || host->card->type != MMC_TYPE_SDIO) {
 		if (!err)
 			mmc_power_off(host);
+	}
+	else if(!host->card || host->card->type == MMC_TYPE_SDIO)
+	{
+		is_mmc_resume = 1;
 	}
 
 	return err;
@@ -1436,6 +1444,7 @@ int mmc_resume_host(struct mmc_host *host)
 	 */
 	if (!host->card || host->card->type != MMC_TYPE_SDIO)
 		mmc_detect_change(host, 1);
+	is_mmc_resume = 0;
 
 	return err;
 }

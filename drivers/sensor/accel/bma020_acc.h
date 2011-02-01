@@ -10,9 +10,11 @@
 #define BMA150_MAJOR 	100
 
 /* bma020 ioctl command label */
+#if 0
 #define IOCTL_BMA020_GET_ACC_VALUE		0
 #define DCM_IOC_MAGIC			's'
 #define IOC_SET_ACCELEROMETER	_IO (DCM_IOC_MAGIC, 0x64)
+#endif
 
 
 #define BMA020_POWER_OFF               0

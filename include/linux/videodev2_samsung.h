@@ -16,6 +16,9 @@
 #ifndef __LINUX_VIDEODEV2_SAMSUNG_H
 #define __LINUX_VIDEODEV2_SAMSUNG_H
 
+#if 1 //def CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[
+#include <media/camsensor_type.h>
+#endif // VE_GROUP ]]
 /* Values for 'capabilities' field */
 /* Object detection device */
 #define V4L2_CAP_OBJ_RECOGNITION	0x10000000
@@ -430,6 +433,9 @@ enum v4l2_anti_banding{
 #define V4L2_CID_CAMERA_APP_CHECK					(V4L2_CID_PRIVATE_BASE+118)
 #define V4L2_CID_CAMERA_CHECK_FLIP					(V4L2_CID_PRIVATE_BASE+119)
 #define V4L2_CID_ESD_INT					(V4L2_CID_PRIVATE_BASE+120)
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[
+#define V4L2_CID_CAM_SENSOR_TYPE				(V4L2_CID_PRIVATE_BASE+121)
+#endif // VE_GROUP ]]
 #endif
 
 /*      Pixel format FOURCC depth  Description  */

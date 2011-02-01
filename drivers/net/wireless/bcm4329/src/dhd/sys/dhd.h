@@ -390,9 +390,7 @@ extern void dhd_customer_gpio_wlan_ctrl(int onoff);
 extern void dhd_os_sdunlock_sndup_rxq(dhd_pub_t * pub);
 extern void dhd_os_sdlock_eventq(dhd_pub_t * pub);
 extern void dhd_os_sdunlock_eventq(dhd_pub_t * pub);
-#ifdef DHD_DEBUG
 extern int write_to_file(dhd_pub_t *dhd, uint8 *buf, int size);
-#endif /* DHD_DEBUG */
 #if defined(OOB_INTR_ONLY)
 extern int dhd_customer_oob_irq_map(unsigned long *irq_flags_ptr);
 #endif /* defined(OOB_INTR_ONLY) */
@@ -448,7 +446,14 @@ typedef enum cust_gpio_modes {
 	WLAN_POWER_ON,
 	WLAN_POWER_OFF
 } cust_gpio_modes_t;
-extern int wl_iw_iscan_set_scan_broadcast_prep(struct net_device *dev, uint flag);
+
+#ifdef WL_IW_USE_ISCAN 
+extern int wl_iw_iscan_set_scan_broadcast_prep(struct net_device *dev, uint flag); 
+#endif 
+#ifdef WL_IW_USE_ESCAN 
+extern int  wl_iw_escan_set_scan_broadcast_prep(struct net_device *dev, uint flag); 
+#endif 
+
 extern int wl_iw_send_priv_event(struct net_device *dev, char *flag);
 /*
  * Insmod parameters for debug/test
@@ -521,6 +526,10 @@ extern char nv_path[MOD_PARAM_PATHLEN];
 
 #ifdef APSTA_PINGTEST
 #define MAX_GUEST 8
+#endif
+
+#ifdef CONFIG_CONTROL_PM
+extern bool g_PMcontrol;
 #endif
 
 extern void dhd_wait_for_event(dhd_pub_t *dhd, bool *lockvar);

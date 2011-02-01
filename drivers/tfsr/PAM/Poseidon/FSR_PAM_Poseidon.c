@@ -10,7 +10,7 @@
  */
 
 /**
- * @version     LinuStoreIII_1.2.0_b034-FSR_1.2.1p1_b129_RC
+ * @version     LinuStoreIII_1.2.0_b038-FSR_1.2.1p1_b139_RTM
  * @file        drivers/tfsr/PAM/Poseidon/FSR_PAM_Poseidon.c
  * @brief       This file contain the Platform Adaptation Modules for Poseidon
  *
@@ -32,11 +32,11 @@
 /*****************************************************************************/
 /**< if FSR_ENABLE_FLEXOND_LFT is defined, 
      Low level function table is linked with Flex-OneNAND LLD */
-#define     FSR_ENABLE_FLEXOND_LFT
+//#define     FSR_ENABLE_FLEXOND_LFT
 
 /**< if FSR_ENABLE_ONENAND_LFT is defined, 
      Low level function table is linked with OneNAND LLD */
-#define     FSR_ENABLE_ONENAND_LFT
+//#define     FSR_ENABLE_ONENAND_LFT
 
 /**< if FSR_ENABLE_4K_ONENAND_LFT is defined, 
      Low level function table is linked with OneNAND LLD */

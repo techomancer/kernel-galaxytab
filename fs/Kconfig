@@ -166,6 +166,7 @@ menuconfig MISC_FILESYSTEMS
 
 if MISC_FILESYSTEMS
 
+# RFS File System configuration
 
 source "fs/adfs/Kconfig"
 source "fs/affs/Kconfig"

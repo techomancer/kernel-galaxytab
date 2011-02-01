@@ -41,7 +41,7 @@ int bma020_soft_reset()
 	return comres;
 }
 
-#if 0
+#if 1
 int bma020_update_image() 
 {
 	int comres;

@@ -1,11 +1,44 @@
- 
- /*****************************************************************************
+/* 
+
+ * drivers/i2c/chips/akm8973.c - akm8973 compass driver
+
  *
- * COPYRIGHT(C) : Samsung Electronics Co.Ltd, 2006-2015 ALL RIGHTS RESERVED
+
+ * Copyright (C) 2008-2009 HTC Corporation.
+
+ * Author: viral wang <viralwang@gmail.com>
+
  *
- *****************************************************************************/
+
+ * This software is licensed under the terms of the GNU General Public
+
+ * License version 2, as published by the Free Software Foundation, and
+
+ * may be copied, distributed, and modified under those terms.
+
+ *
+
+ * This program is distributed in the hope that it will be useful,
+
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+
+ * GNU General Public License for more details.
+
+ *
+
+ */
+
  
 
+/*
+
+ * Revised by AKM 2010/03/25
+
+ * 
+
+ */
 
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
@@ -979,6 +1012,6 @@ static void __exit ak8973b_exit(void)
 module_init(ak8973b_init);
 module_exit(ak8973b_exit);
 
-MODULE_AUTHOR("SAMSUNG");
+MODULE_AUTHOR("Asahi Kasei Microdevices");
 MODULE_DESCRIPTION("AK8973B compass driver");
 MODULE_LICENSE("GPL");

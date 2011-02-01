@@ -12,26 +12,36 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
-
+#include <linux/wakelock.h>
+#include <linux/input.h>
 
 #include "bma020_acc.h"
+#include "bma020calib.h"
 
 // this proc file system's path is "/proc/driver/bma020"
 // usage :	(at the path) type "cat bma020" , it will show short information for current accelation
 // 			use it for simple working test only
+#define	ACC_ENABLED 1
+/* create bma020 object */
+bma020_t bma020;
+
+/* create bma020 registers object */
+bma020regs_t bma020regs;
+
 
 //#define BMA020_PROC_FS
-
 #ifdef BMA020_PROC_FS
+
+static void bma_acc_enable(void);
+static void bma_acc_disable(void);
 
 #include <linux/proc_fs.h>
 
 #define DRIVER_PROC_ENTRY		"driver/bma020"
-
+#if 0
 static int bma020_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)
 {
-	char *p = page;
-	int len;
+
 	bma020acc_t acc;
 	bma020_set_mode( BMA020_MODE_NORMAL );
 	bma020_read_accel_xyz(&acc);
@@ -45,6 +55,35 @@ static int bma020_proc_read(char *page, char **start, off_t off, int count, int 
 	*start = page + off;
 	return len;
 }
+#else
+
+static int bma020_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	char *p = page;
+	int len = 0;
+	
+	mutex_lock(&bma020.power_lock);
+	printk("bma222_proc_read\n");
+	bma020_set_mode( BMA020_MODE_NORMAL );
+
+	bma020.state |= ACC_ENABLED;
+	bma_acc_enable();
+
+	mutex_unlock(&bma020.power_lock);
+
+	len = (p - page) - off;
+	if (len < 0) {
+		len = 0;
+	}
+
+	printk("bma_proc_read: success full\n");
+
+	*eof = (len <= count) ? 1 : 0;
+	*start = page + off;
+	return len;
+}
+#endif
+
 #endif	//BMA020_PROC_FS
 
 /* add by inter.park */
@@ -55,11 +94,6 @@ struct class *acc_class;
 /* no use */
 //static int bma020_irq_num = NO_IRQ;
 
-/* create bma020 object */
-bma020_t bma020;
-
-/* create bma020 registers object */
-bma020regs_t bma020regs;
 
 /*************************************************************************/
 /*		BMA020 Sysfs	  				         */
@@ -85,6 +119,67 @@ static ssize_t bma020_fs_write(struct device *dev, struct device_attribute *attr
 	return size;
 }
 
+
+static ssize_t bma020_calibration(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+	int err;
+	bma020acc_t data, offset;	
+	/* iteration time 20 */
+	int temp = 20;
+	int i = 0;
+
+	//buf[size]=0;
+	printk("input data --> %s\n", buf);
+	if(*(buf+i) == '-')		// if number has minus
+	{
+		i++;
+		data.x = -(*(buf+i) - '0');
+		i++;
+	}
+	else
+	{
+		data.x =(*(buf+i) - '0');
+		i++;
+	}
+	
+	if(*(buf+i) == '-')		// if number has minus
+	{
+		i++;
+		data.y = -(*(buf+i) - '0');
+		i++;
+	}
+	else
+	{
+		data.y = (*(buf+i) - '0');
+		i++;
+	}
+	
+	if(*(buf+i) == '-')		// if number has minus
+	{
+		i++;
+		data.z = -(*(buf+i) - '0');
+		i++;
+	}
+	else
+	{
+		data.z = (*(buf+i) - '0');
+		i++;
+	}
+	
+	if((data.x >= -1 && data.x <=1) && (data.y >= -1 && data.y <=1) && (data.z >= -1 && data.z <=1) )
+	{
+		/* iteration time 20 */
+		err = bma020_calibrate(data, &offset);
+		printk( "BMA020_CALIBRATION status: %d\n", err);
+	}
+	else
+	{
+		printk( "BMA020_CALIBRATION data err \n");
+	}
+	return size;
+}
+
+static DEVICE_ATTR(calibration, S_IRUGO | S_IWUSR | S_IWOTH | S_IXOTH, NULL, bma020_calibration);
 static DEVICE_ATTR(acc_file, S_IRUGO | S_IWUSR | S_IWOTH | S_IXOTH, bma020_fs_read, bma020_fs_write);
 
 
@@ -178,8 +273,9 @@ int bma020_ioctl(struct inode *inode, struct file *filp, unsigned int ioctl_num,
 int bma020_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsigned long arg)
 {
 	int err = 0;
-	unsigned char data[6];
-
+	unsigned char data[6];	
+	int temp;
+	
 	/* check cmd */
 	if(_IOC_TYPE(cmd) != BMA150_IOC_MAGIC)
 	{
@@ -227,20 +323,21 @@ int bma020_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsi
 #if DEBUG
 				printk("copy_to error\n");
 #endif
-				return -EFAULT;
+				err = -EFAULT;
+				break;
 			}
-			return err;
-
+			break;
 		case BMA150_SET_RANGE:
 			if(copy_from_user(data,(unsigned char*)arg,1)!=0)
 			{
 #if DEBUG           
 				printk("[BMA150] copy_from_user error\n");
 #endif
-				return -EFAULT;
+				err = -EFAULT;
+				break;
 			}
 			err = bma020_set_range(*data);
-			return err;
+			break;
 		
 		case BMA150_SET_MODE:
 			if(copy_from_user(data,(unsigned char*)arg,1)!=0)
@@ -248,10 +345,11 @@ int bma020_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsi
 #if DEBUG           
 				printk("[BMA150] copy_from_user error\n");
 #endif
-				return -EFAULT;
+				err = -EFAULT;
+				break;
 			}
 			err = bma020_set_mode(*data);
-			return err;
+			break;
 
 		case BMA150_SET_BANDWIDTH:
 			if(copy_from_user(data,(unsigned char*)arg,1)!=0)
@@ -259,14 +357,30 @@ int bma020_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,  unsi
 #if DEBUG
 				printk("[BMA150] copy_from_user error\n");
 #endif
-				return -EFAULT;
+				err = -EFAULT;
+				break;
 			}
 			err = bma020_set_bandwidth(*data);
-			return err;
-		
+			break;
+			
+		/* offset calibration routine */			
+		case BMA150_CALIBRATION:
+			printk("[%s] case: BMA150_CALIBRATION\n", __func__);
+			if(copy_from_user((bma020acc_t*)data,(bma020acc_t*)arg, 6)!=0)
+			{
+				printk("copy_from_user error\n");
+				err = -EFAULT;
+				break;
+			}
+			
+			/* iteration time 20 */
+			temp = 20;
+			err = bma020_calibrate(*(bma020acc_t*)data, &temp);
+			printk( "BMA150_CALIBRATION status: %d\n", err);		
 		default:
-			return 0;
+			break;
 	}
+	return err;
 }
 
 struct file_operations acc_fops =
@@ -304,6 +418,7 @@ void bma020_chip_init(void)
 
 	bma020.bma020_bus_write = i2c_acc_bma020_write;
 	bma020.bma020_bus_read  = i2c_acc_bma020_read;
+	bma020.delay_msec 		= i2c_acc_bma020_delay;
 
 //go2sun.park@ 2010-08-06
 //#ifdef CONFIG_HAS_EARLYSUSPEND
@@ -335,10 +450,129 @@ void bma020_chip_init(void)
 
 }
 
+
+/////////////////////////////////////////////////////////////////////////////////////
+static void bma_acc_enable(void)
+{
+	printk("starting poll timer, delay %lldns\n", ktime_to_ns(bma020.acc_poll_delay));
+	hrtimer_start(&bma020.timer, bma020.acc_poll_delay, HRTIMER_MODE_REL);
+}
+
+static void bma_acc_disable(void)
+{
+	printk("cancelling poll timer\n");
+	hrtimer_cancel(&bma020.timer);
+	cancel_work_sync(&bma020.work_acc);
+}
+
+static ssize_t poll_delay_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%lld\n", ktime_to_ns(bma020.acc_poll_delay));
+}
+
+
+static ssize_t poll_delay_store(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+	int64_t new_delay;
+	int err;
+
+	err = strict_strtoll(buf, 10, &new_delay);
+	if (err < 0)
+		return err;
+
+	printk("new delay = %lldns, old delay = %lldns\n",
+		    new_delay, ktime_to_ns(bma020.acc_poll_delay));
+	mutex_lock(&bma020.power_lock);
+	if (new_delay != ktime_to_ns(bma020.acc_poll_delay)) {
+		bma_acc_disable();
+		bma020.acc_poll_delay = ns_to_ktime(new_delay);
+		if (bma020.state & ACC_ENABLED) {
+			bma_acc_enable();
+		}
+	}
+	mutex_unlock(&bma020.power_lock);
+
+	return size;
+}
+
+static ssize_t acc_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (bma020.state & ACC_ENABLED) ? 1 : 0);
+}
+
+
+static ssize_t acc_enable_store(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+	bool new_value;
+
+	if (sysfs_streq(buf, "1"))
+		new_value = true;
+	else if (sysfs_streq(buf, "0"))
+		new_value = false;
+	else {
+		pr_err("%s: invalid value %d\n", __func__, *buf);
+		return -EINVAL;
+	}
+
+	mutex_lock(&bma020.power_lock);
+	printk("new_value = %d, old state = %d\n", new_value, (bma020.state & ACC_ENABLED) ? 1 : 0);
+	if (new_value && !(bma020.state & ACC_ENABLED)) {
+		bma020.state |= ACC_ENABLED;
+		bma_acc_enable();
+	} else if (!new_value && (bma020.state & ACC_ENABLED)) {
+		bma_acc_disable();
+		bma020.state = 0;
+	}
+	mutex_unlock(&bma020.power_lock);
+	return size;
+}
+
+static DEVICE_ATTR(poll_delay, S_IRUGO | S_IWUSR | S_IWGRP,
+		   poll_delay_show, poll_delay_store);
+
+static struct device_attribute dev_attr_acc_enable =
+	__ATTR(enable, S_IRUGO | S_IWUSR | S_IWGRP,
+	       acc_enable_show, acc_enable_store);
+
+static struct attribute *acc_sysfs_attrs[] = {
+	&dev_attr_acc_enable.attr,
+	&dev_attr_poll_delay.attr,
+	NULL
+};
+
+static struct attribute_group acc_attribute_group = {
+	.attrs = acc_sysfs_attrs,
+};
+///////////////////////////////////////////////////////////////////////////////////
+
+static void bma_work_func_acc(struct work_struct *work)
+{
+	bma020acc_t acc;
+	int err;
+		
+	err = bma020_read_accel_xyz(&acc);
+	
+	input_report_abs(bma020.acc_input_dev, ABS_X, acc.x);
+	input_report_abs(bma020.acc_input_dev, ABS_Y, acc.y);
+	input_report_abs(bma020.acc_input_dev, ABS_Z, acc.z);
+	input_sync(bma020.acc_input_dev);
+}
+
+/* This function is for light sensor.  It operates every a few seconds.
+ * It asks for work to be done on a thread because i2c needs a thread
+ * context (slow and blocking) and then reschedules the timer to run again.
+ */
+static enum hrtimer_restart bma_timer_func(struct hrtimer *timer)
+{
+	queue_work(bma020.wq, &bma020.work_acc);
+	hrtimer_forward_now(&bma020.timer, bma020.acc_poll_delay);
+	return HRTIMER_RESTART;
+}
+
 int bma020_acc_start(void)
 {
-	int result;
-
+	int result,err;
+	struct input_dev *input_dev;
 	struct device *dev_t;
 	
 	bma020acc_t accels; /* only for test */
@@ -368,6 +602,67 @@ int bma020_acc_start(void)
 	
 	if (device_create_file(dev_t, &dev_attr_acc_file) < 0)
 		printk("Failed to create device file(%s)!\n", dev_attr_acc_file.attr.name);
+		
+	if (device_create_file(dev_t, &dev_attr_calibration) < 0)
+		printk("Failed to create device file(%s)!\n", dev_attr_calibration.attr.name);
+
+	mutex_init(&bma020.power_lock);
+
+	/* hrtimer settings.  we poll for light values using a timer. */
+	hrtimer_init(&bma020.timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	bma020.acc_poll_delay = ns_to_ktime(240 * NSEC_PER_MSEC);
+	bma020.timer.function = bma_timer_func;
+
+	/* the timer just fires off a work queue request.  we need a thread
+	   to read the i2c (can be slow and blocking). */
+	bma020.wq = create_singlethread_workqueue("bma_wq");
+	if (!bma020.wq) {
+		err = -ENOMEM;
+		printk("%s: could not create workqueue\n", __func__);
+		goto err_create_workqueue;
+	}
+	/* this is the thread function we run on the work queue */
+	INIT_WORK(&bma020.work_acc, bma_work_func_acc);
+
+	/* allocate lightsensor-level input_device */
+	input_dev = input_allocate_device();
+	if (!input_dev) {
+		printk("%s: could not allocate input device\n", __func__);
+		err = -ENOMEM;
+		goto err_input_allocate_device_light;
+	}
+	input_set_drvdata(input_dev, &bma020);
+	input_dev->name = "accel";
+
+
+	set_bit(EV_ABS, input_dev->evbit);	
+	/* acceleration x-axis */
+	input_set_capability(input_dev, EV_ABS, ABS_X);
+	input_set_abs_params(input_dev, ABS_X, -1024, 1024, 0, 0);
+	/* acceleration y-axis */
+	input_set_capability(input_dev, EV_ABS, ABS_Y);
+	input_set_abs_params(input_dev, ABS_Y, -1024, 1024, 0, 0);
+	/* acceleration z-axis */
+	input_set_capability(input_dev, EV_ABS, ABS_Z);
+	input_set_abs_params(input_dev, ABS_Z, -1024, 1024, 0, 0);
+
+	printk("registering lightsensor-level input device\n");
+	err = input_register_device(input_dev);
+	if (err < 0) {
+		printk("%s: could not register input device\n", __func__);
+		input_free_device(input_dev);
+		goto err_input_register_device_light;
+	}
+	bma020.acc_input_dev = input_dev;
+
+
+	err = sysfs_create_group(&input_dev->dev.kobj,&acc_attribute_group);
+	if (err) {
+		printk("Creating bma020 attribute group failed");
+		goto error_device;
+	}
+//////////////////////////////////////////////////////////////////////////////
+
 	
 	result = i2c_acc_bma020_init();
 
@@ -407,6 +702,17 @@ int bma020_acc_start(void)
 	gprintk("[BMA020] set_mode BMA020_MODE_SLEEP\n");
 	
 	return 0;
+
+error_device:
+	sysfs_remove_group(&input_dev->dev.kobj, &acc_attribute_group);
+err_input_register_device_light:
+	input_unregister_device(bma020.acc_input_dev);
+err_input_allocate_device_light:	
+	destroy_workqueue(bma020.wq);
+err_create_workqueue:
+	mutex_destroy(&bma020.power_lock);
+exit:
+	return err;
 }
 
 void bma020_acc_end(void)
@@ -421,6 +727,7 @@ void bma020_acc_end(void)
 	unregister_early_suspend(&bma020.early_suspend);
 #endif
 }
+
 
 
 static int bma020_accelerometer_probe( struct platform_device* pdev )
@@ -466,15 +773,22 @@ static int bma020_accelerometer_probe( struct platform_device* pdev )
 
 static int bma020_accelerometer_suspend( struct platform_device* pdev, pm_message_t state )
 {
-	printk("############## %s \n",__func__); 
+	printk(" %s \n",__func__); 
 	bma020_set_mode( BMA020_MODE_SLEEP );
+
+	if (bma020.state & ACC_ENABLED) 
+		bma_acc_disable();
 	return 0;
 }
 
 
 static int bma020_accelerometer_resume( struct platform_device* pdev )
 {
-	printk("@@@@ %s \n",__func__); 
+	printk(" %s \n",__func__); 
+
+	if (bma020.state & ACC_ENABLED)
+		bma_acc_enable();
+	
 	bma020_set_mode( BMA020_MODE_NORMAL );
 	return 0;
 }

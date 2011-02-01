@@ -67,7 +67,7 @@ int fg_check_status_reg(void);
 
 /* Prototypes */
 extern void FSA9480_ChangePathToAudio(u8 enable);
-extern u8 FSA9480_Get_JIG_Status(void);
+//extern u8 FSA9480_Get_JIG_Status(void);
 extern int s3c_adc_get_adc_data(int channel);
 extern void MAX8998_IRQ_init(void);
 extern void maxim_charging_control(unsigned int dev_type  , unsigned int cmd);
@@ -146,6 +146,7 @@ static struct work_struct bat_work;
 static struct work_struct cable_work;
 static struct delayed_work fuelgauge_work;
 static struct delayed_work fullcharging_work;
+static struct delayed_work full_comp_work;
 static struct device *dev;
 static struct timer_list polling_timer;
 static struct timer_list cable_timer;
@@ -154,7 +155,9 @@ static int force_update;
 static int full_charge_flag;
 static int old_charging_source;
 static int low_batt_boot_flag = 0;
+static u32 is_recharging = 0;
 int low_batt_comp_flag = 0;
+int soc_restart_flag = 0;
 
 #ifndef __FUEL_GAUGES_IC__
 static int batt_max;
@@ -756,15 +759,27 @@ static int s3c_get_bat_vol(struct power_supply *bat_ps)
 }
 #else /* __FUEL_GAUGES_IC__ */
 
+#define LOW_BATT_COMP_RANGE_NUM	5
+#define MAX_LOW_BATT_CHECK_CNT	10  /* 20 seconds */
 static int check_start_vol = 0;
-static int low_batt_comp_cnt[3][2] = { {0, 0}, {0, 0}, {0, 0} };
+static int low_batt_comp_cnt[LOW_BATT_COMP_RANGE_NUM][2] = { {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0} };
 
-static int Over1A_Level1_Threshold = 0;  // Over 1A (1%)
-static int Over1A_Level3_Threshold = 0;  // Over 1A (3%)
-static int Under1A_Level1_Threshold = 0;  // Under 1A (1%)
-static int Under1A_Level3_Threshold = 0;  // Under 1A (3%)
-static int Under500mA_level1_Threshold = 0;  // Under 500mA (1%)
-static int Under500mA_level3_Threshold = 0;  // Under 500mA (3%)
+static void display_low_batt_comp_cnt(void)
+{
+	u8 type_str[10];
+
+	if(battery_type == SDI_BATTERY_TYPE)
+		sprintf(type_str, "SDI");
+	else if(battery_type == ATL_BATTERY_TYPE)
+		sprintf(type_str, "ATL");
+	else
+		sprintf(type_str, "Unknown");
+
+	printk("Check Array(%s) : [%d, %d], [%d, %d], [%d, %d], [%d, %d], [%d, %d]\n", type_str,
+			low_batt_comp_cnt[0][0], low_batt_comp_cnt[0][1], low_batt_comp_cnt[1][0], low_batt_comp_cnt[1][1],
+			low_batt_comp_cnt[2][0], low_batt_comp_cnt[2][1], low_batt_comp_cnt[3][0], low_batt_comp_cnt[3][1],
+			low_batt_comp_cnt[4][0], low_batt_comp_cnt[4][1]);
+}
 
 static void add_low_batt_comp_cnt(int range, int level)
 {
@@ -774,8 +789,10 @@ static void add_low_batt_comp_cnt(int range, int level)
 	// Increase the requested count value, and reset others.
 	low_batt_comp_cnt[range-1][level/2] ++;
 
-	for(i = 0; i < 3; i++) {
-		for(j = 0; j < 2; j++) {
+	for(i = 0; i < LOW_BATT_COMP_RANGE_NUM; i++)
+	{
+		for(j = 0; j < 2; j++)
+		{
 			if(i == range-1 && j == level/2)
 				continue;  // keep the count value.
 			else
@@ -784,19 +801,26 @@ static void add_low_batt_comp_cnt(int range, int level)
 	}
 }
 
+static void reset_low_batt_comp_cnt(void)
+{
+	memset(low_batt_comp_cnt, 0x0, sizeof(low_batt_comp_cnt));
+//	printk("%s : Reset check array count.\n", __func__);
+}
+
 static int check_low_batt_comp_condtion(int* nLevel)
 {
 	int i = 0;
 	int j = 0;
 	int ret = 0;
 
-	for(i = 0; i < 3; i++) {
-		for(j = 0; j < 2; j++) {
-			if(low_batt_comp_cnt[i][j] >= 3)
+	for(i = 0; i < LOW_BATT_COMP_RANGE_NUM; i++)
+		{
+		for(j = 0; j < 2; j++)
+		{
+			if(low_batt_comp_cnt[i][j] >= MAX_LOW_BATT_CHECK_CNT)
 			{
-				printk("Count Array : [0,0]=%d, [0,1]=%d, [1,0]=%d, [1,1]=%d, [2,0]=%d, [2,1]=%d\n",
-					low_batt_comp_cnt[0][0], low_batt_comp_cnt[0][1], low_batt_comp_cnt[1][0],
-					low_batt_comp_cnt[1][1], low_batt_comp_cnt[2][0], low_batt_comp_cnt[2][1]);
+				display_low_batt_comp_cnt();
+
 				ret = 1;
 				*nLevel = j*2 + 1;  // 0->1%, 1->3%
 				break;
@@ -807,81 +831,255 @@ static int check_low_batt_comp_condtion(int* nLevel)
 	return ret;
 }
 
+static int get_low_batt_threshold(int range, int level, int nCurrent)
+{
+	int ret = 0;
+
+	if(battery_type == SDI_BATTERY_TYPE)
+	{
+		switch(range) {
+		case 4:
+			if(level == 1)
+				ret = SDI_Range4_1_Offset + ((nCurrent * SDI_Range4_1_Slope) / 1000);
+			else if(level == 3)
+				ret = SDI_Range4_3_Offset + ((nCurrent * SDI_Range4_3_Slope) / 1000);
+			break;
+		
+		case 3:
+			if(level == 1)
+				ret = SDI_Range3_1_Offset + ((nCurrent * SDI_Range3_1_Slope) / 1000);
+			else if(level == 3)
+				ret = SDI_Range3_3_Offset + ((nCurrent * SDI_Range3_3_Slope) / 1000);
+			break;
+		
+		case 2:
+			if(level == 1)
+				ret = SDI_Range2_1_Offset + ((nCurrent * SDI_Range2_1_Slope) / 1000);
+			else if(level == 3)
+				ret = SDI_Range2_3_Offset + ((nCurrent * SDI_Range2_3_Slope) / 1000);
+			break;
+		
+		case 1:
+			if(level == 1)
+				ret = SDI_Range1_1_Offset + ((nCurrent * SDI_Range1_1_Slope) / 1000);
+			else if(level == 3)
+				ret = SDI_Range1_3_Offset + ((nCurrent * SDI_Range1_3_Slope) / 1000);
+			break;
+		
+		default:
+			break;
+		}
+	}
+	else if(battery_type == ATL_BATTERY_TYPE)
+	{
+		switch(range) {
+		case 5:
+			if(level == 1)
+				ret = ATL_Range5_1_Offset + ((nCurrent * ATL_Range5_1_Slope) / 1000);
+			else if(level == 3)
+				ret = ATL_Range5_3_Offset + ((nCurrent * ATL_Range5_3_Slope) / 1000);
+			break;
+
+		case 4:
+			if(level == 1)
+				ret = ATL_Range4_1_Offset + ((nCurrent * ATL_Range4_1_Slope) / 1000);
+			else if(level == 3)
+				ret = ATL_Range4_3_Offset + ((nCurrent * ATL_Range4_3_Slope) / 100000);  // Slope value range is different
+			break;
+		
+		case 3:
+			if(level == 1)
+				ret = ATL_Range3_1_Offset + ((nCurrent * ATL_Range3_1_Slope) / 1000);
+			else if(level == 3)
+				ret = ATL_Range3_3_Offset + ((nCurrent * ATL_Range3_3_Slope) / 1000);
+			break;
+		
+		case 2:
+			if(level == 1)
+				ret = ATL_Range2_1_Offset + ((nCurrent * ATL_Range2_1_Slope) / 1000);
+			else if(level == 3)
+				ret = ATL_Range2_3_Offset + ((nCurrent * ATL_Range2_3_Slope) / 1000);
+			break;
+		
+		case 1:
+			if(level == 1)
+				ret = ATL_Range1_1_Offset + ((nCurrent * ATL_Range1_1_Slope) / 1000);
+			else if(level == 3)
+				ret = ATL_Range1_3_Offset + ((nCurrent * ATL_Range1_3_Slope) / 1000);
+			break;
+		
+		default:
+			break;
+		}
+	}
+	
+//	printk("%s : Range%d, Level%d, Avg_Current(%d) -> Threshold(%d)\n", __func__, range, level, avg_current, ret);
+
+	return ret;
+}
+
 static int s3c_low_batt_compensation(int fg_soc,int fg_vcell, int fg_current)
 {
 	int nRet=0;
 	int fg_avg_current=0;
+	int fg_min_current=0;
 	int new_level = 0;
-
-	fg_avg_current = fg_read_avg_current();
+	int bCntReset=0;
 
 	if(!check_start_vol)  // If not initialized yet, then init threshold values.
 	{
-		if(battery_type == SDI_BATTERY_TYPE) {
+		if(battery_type == SDI_BATTERY_TYPE)
 			check_start_vol = 3550;  // Under 3.55V
-			Over1A_Level1_Threshold = SDI_Range3_1_Threshold;
-			Over1A_Level3_Threshold = SDI_Range3_3_Threshold;
-			Under1A_Level1_Threshold = SDI_Range2_1_Threshold;
-			Under1A_Level3_Threshold = SDI_Range2_3_Threshold;
-			Under500mA_level1_Threshold = SDI_Range1_1_Threshold;
-			Under500mA_level3_Threshold = SDI_Range1_3_Threshold;
-		}
-		else if(battery_type == ATL_BATTERY_TYPE) {
+		else if(battery_type == ATL_BATTERY_TYPE)
 			check_start_vol = 3450;  // Under 3.45V
-			Over1A_Level1_Threshold = ATL_Range3_1_Threshold;
-			Over1A_Level3_Threshold = ATL_Range3_3_Threshold;
-			Under1A_Level1_Threshold = ATL_Range2_1_Threshold;
-			Under1A_Level3_Threshold = ATL_Range2_3_Threshold;
-			Under500mA_level1_Threshold = ATL_Range1_1_Threshold;
-			Under500mA_level3_Threshold = ATL_Range1_3_Threshold;
-		}
 	}
 	
 	/////////////////////////////////////////////////////////////////
-	if(!s3c_bat_info.bat_info.charging_enabled && !low_batt_comp_flag
-		&& (fg_vcell <= check_start_vol))  // Not charging, flag is none, Under 3.7V
+	if(!s3c_bat_info.bat_info.charging_enabled
+		&& !low_batt_comp_flag
+		&& (fg_vcell <= check_start_vol))  // Not charging, flag is none, Under 3.55V or 3.45V
 	{
-		if(fg_avg_current < -1000)  // I > 1A
-		{		
-			if(fg_soc >= 2 && fg_vcell < Over1A_Level1_Threshold) {  // 1%
-				add_low_batt_comp_cnt(3, 1);
-//				fg_low_batt_compensation(1);
+		fg_avg_current = fg_read_avg_current();
+		fg_min_current = min(fg_avg_current, fg_current);
+	
+		if(battery_type == SDI_BATTERY_TYPE)
+		{
+			if(fg_min_current < -1250)  // I > 1.25A
+			{
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(4, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(4, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(4, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(4, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
 			}
-			else if(fg_soc >= 4 && fg_vcell < Over1A_Level3_Threshold) {  // 3%
-				add_low_batt_comp_cnt(3, 3);
-//				fg_low_batt_compensation(3);
+			else if(fg_min_current >= -1250 && fg_min_current < -750)  // 0.75A < I <= 1.25A
+			{		
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(3, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(3, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(3, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(3, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
+			}
+			else if(fg_min_current >= -750 && fg_min_current < -100)  // 0.1A < I <= 0.75A
+			{
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(2, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(2, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(2, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(2, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
+			}
+			else if(fg_min_current >= -100 && fg_min_current < 0)  // I <= 0.1A
+			{
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(1, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(1, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(1, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(1, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
 			}
 		}
-		else if(fg_avg_current >= -1000 && fg_avg_current < -500)  // 0.5A < I <= 1A
+		else if(battery_type == ATL_BATTERY_TYPE)
 		{
-			if(fg_soc >= 2 && fg_vcell < Under1A_Level1_Threshold) {  // 1%
-				add_low_batt_comp_cnt(2, 1);
-//				fg_low_batt_compensation(1);
+			if(fg_min_current < -1000)  // I > 1A
+			{
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(5, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(5, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(5, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(5, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
 			}
-			else if(fg_soc >= 4 && fg_vcell < Under1A_Level3_Threshold) {  // 3%
-				add_low_batt_comp_cnt(2, 3);
-//				fg_low_batt_compensation(3);
+			else if(fg_min_current >= -1000 && fg_min_current < -700)  // 0.7A < I <= 1A
+			{
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(4, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(4, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(4, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(4, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
 			}
-		}
-		else if(fg_avg_current >= -500 && fg_avg_current < 0)  // I <= 0.5A
-		{
-			if(fg_soc >= 2 && fg_vcell < Under500mA_level1_Threshold) {  // 1%
-				add_low_batt_comp_cnt(1, 1);
-//				fg_low_batt_compensation(1);
+			else if(fg_min_current >= -700 && fg_min_current < -500)  // 0.5A < I <= 0.7A
+			{		
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(3, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(3, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(3, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(3, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
 			}
-			else if(fg_soc >= 4 && fg_vcell < Under500mA_level3_Threshold) {  // 3%
-				add_low_batt_comp_cnt(1, 3);
-//				fg_low_batt_compensation(3);
+			else if(fg_min_current >= -500 && fg_min_current < -250)  // 0.25A < I <= 0.5A
+			{
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(2, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(2, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(2, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(2, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
+			}
+			else if(fg_min_current >= -250 && fg_min_current < 0)  // I <= 0.25A
+			{
+				if(fg_soc >= 2 && fg_vcell < get_low_batt_threshold(1, 1, fg_min_current)) {  // 1%
+					add_low_batt_comp_cnt(1, 1);
+				}
+				else if(fg_soc >= 4 && fg_vcell < get_low_batt_threshold(1, 3, fg_min_current)) {  // 3%
+					add_low_batt_comp_cnt(1, 3);
+				}
+				else
+				{
+					bCntReset=1;
+				}
 			}
 		}
 
 		if(check_low_batt_comp_condtion(&new_level))
+		{
 			fg_low_batt_compensation(new_level);
+			reset_low_batt_comp_cnt();
+		}
 
+		if (bCntReset)
+			reset_low_batt_comp_cnt();
+		
 		// if compensation finished, then read SOC again!!
 		if(low_batt_comp_flag)
 		{
-			printk("%s : AVG_CURRENT(%d),CURRENT(%d), SOC(%d), VCELL(%d)\n", __func__, fg_avg_current, fg_current, fg_soc, fg_vcell);		
+			printk("%s : MIN_CURRENT(%d), AVG_CURRENT(%d), CURRENT(%d), SOC(%d), VCELL(%d)\n",
+				__func__, fg_min_current, fg_avg_current, fg_current, fg_soc, fg_vcell);
 			fg_soc = fg_read_soc();
 			printk("%s : SOC is set to %d\n", __func__, fg_soc);
 		}
@@ -895,24 +1093,54 @@ static int s3c_low_batt_compensation(int fg_soc,int fg_vcell, int fg_current)
 
 
 extern int fuel_guage_init;
+static int chk_cnt = 0;
 static int s3c_get_bat_level(struct power_supply *bat_ps)
 {
 	int fg_soc = -1;
 	int fg_vcell = -1;
 	int fg_current = 0;
+	int recover_flag = 0;
+	static int fg_skip = 0;
+	static int skip_cnt = 0;
 
 	static int cnt = 0;
-#ifdef CONFIG_TARGET_LOCALE_KOR
-	static int cnt_backup = 0;
-#endif
 
 	if(!fuel_guage_init)
 		return 50;
+
+/////////////////////////////////////////////////////////////////
+	if(!(chk_cnt % 15))  // every 30 seconds.
+		recover_flag = fg_check_cap_corruption();
+
+	if(!(chk_cnt++ % 150)) {  // every 5 minutes
+		fg_check_vf_fullcap_range();
+		chk_cnt = 1;
+	}
 
 	if ((fg_soc = fg_read_soc()) < 0) {
 		dev_err(dev, "%s: Can't read soc!!!\n", __func__);
 		fg_soc = s3c_bat_info.bat_info.level;
 	}
+
+	if(FSA9480_Get_JIG_Status() || low_batt_comp_flag) {
+		// Do nothing...
+	}
+	else {
+		if( ((fg_soc+5) < prevRepSOC) || (fg_soc > (prevRepSOC+5)) )
+			fg_skip = 1;
+	}
+ 
+//	printk("%s: fg_soc(%d), chk_cnt(%d), fg_skip(%d), recover_flag(%d)\n", __func__, fg_soc, chk_cnt, fg_skip, recover_flag);
+
+	if(fg_skip) {  // skip one time (maximum 30 seconds) because of corruption.
+		printk("%s: skip update until corruption check is done (skip_cnt:%d)\n", __func__, ++skip_cnt);
+		fg_soc = s3c_bat_info.bat_info.level;
+		if(recover_flag || skip_cnt > 150) {
+			fg_skip = 0;
+			skip_cnt = 0;
+		}
+	}
+/////////////////////////////////////////////////////////////////
 
 	if(low_batt_boot_flag) {
 		fg_soc = 0;
@@ -972,37 +1200,6 @@ static int s3c_get_bat_level(struct power_supply *bat_ps)
 	{
 		cnt=0;
 	}
-
-
-#ifdef CONFIG_TARGET_LOCALE_KOR 	
-    if (fg_vcell <= RECHARGE_COND_BACKUP_VOLTAGE  /* 4.0V */
-        && s3c_bat_info.bat_info.charging_source) 
-	{
-		if (!s3c_bat_info.bat_info.charging_enabled 
-		   && s3c_bat_info.bat_info.batt_health==POWER_SUPPLY_HEALTH_GOOD) 
-	     {
-			if(++cnt_backup >10)
-			{
-				dev_info(dev, "%s: recharging at 4.0V\n", __func__);
-				s3c_bat_info.bat_info.batt_is_recharging = 1;
-				s3c_set_chg_en(1);
-				cnt_backup=0;
-				printk( "%s: fg_vcell = %d, fg_soc = %d, is_recharging = %d\n",
-						__func__, fg_vcell, fg_soc, 
-						s3c_bat_info.bat_info.batt_is_recharging);				
-			}
-		}
-		else 
-		{
-			cnt_backup=0;
-		}	
-	}
-	else
-	{
-		cnt_backup=0;
-	}
-#endif
-
 
 	if (fg_soc > 100)
 		fg_soc = 100;
@@ -1647,6 +1844,7 @@ static struct device_attribute s3c_battery_attrs[] = {
 	SEC_BATTERY_ATTR(reset_soc),
 	SEC_BATTERY_ATTR(reset_cap),
 	SEC_BATTERY_ATTR(fg_reg),
+	SEC_BATTERY_ATTR(batt_type),
 #endif /* __FUEL_GAUGES_IC__ */
 #ifdef LPM_MODE
 	SEC_BATTERY_ATTR(charging_mode_booting),
@@ -1700,6 +1898,7 @@ enum {
 	BATT_RESET_SOC,
 	BATT_RESET_CAP,
 	BATT_FG_REG,
+	BATT_BATT_TYPE,
 #endif /* __FUEL_GAUGES_IC__ */
 #ifdef LPM_MODE
 	CHARGING_MODE_BOOTING,
@@ -1730,56 +1929,57 @@ static ssize_t s3c_bat_show_property(struct device *dev,
                                       struct device_attribute *attr,
                                       char *buf)
 {
-        int i = 0;
-        const ptrdiff_t off = attr - s3c_battery_attrs;
+	int i = 0;
+	u8 batt_str[5];
+	const ptrdiff_t off = attr - s3c_battery_attrs;
 
-        switch (off) {
-        case BATT_VOL:
-                i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-                               s3c_bat_info.bat_info.batt_vol);
-                break;
-        case BATT_VOL_ADC:
+	switch (off) {
+	case BATT_VOL:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			s3c_bat_info.bat_info.batt_vol);
+		break;
+	case BATT_VOL_ADC:
 #ifndef __FUEL_GAUGES_IC__
 		s3c_bat_info.bat_info.batt_vol_adc = 
 			s3c_bat_get_adc_data(S3C_ADC_VOLTAGE);
 #else
 		s3c_bat_info.bat_info.batt_vol_adc = 0;
 #endif /* __FUEL_GAUGES_IC__ */
-                i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-                               s3c_bat_info.bat_info.batt_vol_adc);
-                break;
-        case BATT_VOL_ADC_CAL:
-                i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-                               s3c_bat_info.bat_info.batt_vol_adc_cal);
-                break;
-        case BATT_TEMP:
-                i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-                               s3c_bat_info.bat_info.batt_temp);
-                break;
-        case BATT_TEMP_ADC:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			s3c_bat_info.bat_info.batt_vol_adc);
+		break;
+	case BATT_VOL_ADC_CAL:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			s3c_bat_info.bat_info.batt_vol_adc_cal);
+		break;
+	case BATT_TEMP:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			s3c_bat_info.bat_info.batt_temp);
+		break;
+	case BATT_TEMP_ADC:
 		s3c_bat_info.bat_info.batt_temp_adc = 
 			s3c_bat_get_adc_data(ADC_TEMPERATURE);
-                i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-                               s3c_bat_info.bat_info.batt_temp_adc);
-                break;	
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			s3c_bat_info.bat_info.batt_temp_adc);
+		break;	
 #ifdef __TEST_MODE_INTERFACE__
 	case BATT_TEST_MODE:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-		s3c_bat_info.bat_info.batt_test_mode);
+			s3c_bat_info.bat_info.batt_test_mode);
 		break;
 #endif /* __TEST_MODE_INTERFACE__ */
-        case BATT_TEMP_ADC_CAL:
-                i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-                               s3c_bat_info.bat_info.batt_temp_adc_cal);
-                break;
-        case BATT_VOL_ADC_AVER:
+	case BATT_TEMP_ADC_CAL:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
+			s3c_bat_info.bat_info.batt_temp_adc_cal);
+		break;
+	case BATT_VOL_ADC_AVER:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 			s3c_bat_info.bat_info.batt_vol_adc_aver);
 		break;
 #ifdef __BOARD_REV_ADC__
-        case BOARD_REV_ADC:
-                i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", board_rev_adc);
-                break;
+	case BOARD_REV_ADC:
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", board_rev_adc);
+		break;
 #endif /* __BOARD_REV_ADC__ */
 #ifdef __TEST_MODE_INTERFACE__
 	case BATT_VOL_AVER:
@@ -1838,6 +2038,14 @@ static ssize_t s3c_bat_show_property(struct device *dev,
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 			fg_check_chip_state());
 		break;
+	case BATT_BATT_TYPE:
+		if(battery_type == SDI_BATTERY_TYPE)
+			sprintf(batt_str, "SDI");
+		else if(battery_type == ATL_BATTERY_TYPE)
+			sprintf(batt_str, "ATL");
+		i += scnprintf(buf + i, PAGE_SIZE - i, "%s_%s\n",
+			batt_str, batt_str);
+		break;
 #endif /* __FUEL_GAUGES_IC__ */
 #ifdef LPM_MODE
 	case CHARGING_MODE_BOOTING:
@@ -1854,11 +2062,11 @@ static ssize_t s3c_bat_show_property(struct device *dev,
 		break;			
 #endif
 
-        default:
-                i = -EINVAL;
-        }       
-        
-        return i;
+	default:
+		i = -EINVAL;
+	}
+
+	return i;
 }
 
 #ifndef __FUEL_GAUGES_IC__
@@ -2062,9 +2270,9 @@ static ssize_t s3c_bat_store(struct device *dev,
 		dev_info(dev, "%s: Reset SOC:%d\n", __func__, x);
 		break;
 	case BATT_RESET_CAP:
-		if (sscanf(buf, "%d\n", &x) == 1) {
-			if (x == 1)
-				fg_reset_capacity();
+		if (sscanf(buf, "%d\n", &x) == 1 || x==2 || x==3 || x==4) {
+			if (x==1 || x== 2 || x==3 || x==4)
+				fg_reset_capacity(x);
 			ret = count;
 		}
 		dev_info(dev, "%s: Reset CAP:%d\n", __func__, x);
@@ -2072,7 +2280,7 @@ static ssize_t s3c_bat_store(struct device *dev,
 	case BATT_FG_REG:
 		if (sscanf(buf, "%d\n", &x) == 1) {
 			if (x == 1)
-				fg_test_read();
+				fg_periodic_read();
 			ret = count;
 		}
 		dev_info(dev, "%s: FG Register:%d\n", __func__, x);
@@ -2305,7 +2513,7 @@ static int s3c_cable_status_update(int status)
 	power_supply_changed(&s3c_power_supplies[CHARGER_USB]);
 	power_supply_changed(&s3c_power_supplies[CHARGER_AC]);
 */
-	printk("%s: call power_supply_changed\n", __func__);
+//	printk("%s: call power_supply_changed\n", __func__);
 	return ret;
 }
 
@@ -2397,7 +2605,7 @@ static void s3c_bat_status_update(struct power_supply *bat_ps)
 		old_charging_source = s3c_bat_info.bat_info.charging_source;
 		force_update = 0;
 		power_supply_changed(bat_ps);
-		printk("%s: call power_supply_changed\n", __func__);
+//		printk("%s: call power_supply_changed\n", __func__);
 	}
 
 #ifdef CONFIG_TARGET_LOCALE_KOR 
@@ -2487,6 +2695,7 @@ static void s3c_cable_check_status(void)
 		s3c_set_chg_en(1);
 
 		low_batt_comp_flag = 0;  // reset by charging (0904)
+		reset_low_batt_comp_cnt();  // reset low_batt_comp_cnt array value.
 
 		dev_info(dev, "%s: status : %s\n", __func__, 
 				(status == CHARGER_USB) ? "USB" : "AC");
@@ -2742,6 +2951,7 @@ static irqreturn_t s3c_cable_charging_isr(int irq, void *power_supply)
 
 void s3c_cable_charging(void)
 {
+	is_recharging = s3c_bat_info.bat_info.batt_is_recharging;
 	//int chg_ing = gpio_get_value(gpio_chg_ing);
 	//dev_info(dev, "%s: irq=0x%x, gpio_chg_ing=%d\n", __func__, irq, chg_ing);
 
@@ -2760,11 +2970,15 @@ void s3c_cable_charging(void)
 		s3c_bat_info.bat_info.batt_is_full = 1;
 		force_update = 1;
 		full_charge_flag = 1;
+
+		// 2010.09.13 full charge compensation algorithm
+		fg_fullcharged_compensation(is_recharging, 1);
+
+		cancel_delayed_work(&full_comp_work);
+		schedule_delayed_work(&full_comp_work, 100);  // after 1sec
+
 		printk("%s battery is full charged\n",__func__);
 	}
-
-	// 2010.09.13 full charge compensation algorithm
-	fg_fullcharged_compensation();
 
 	schedule_work(&bat_work);
 	/*
@@ -2829,6 +3043,19 @@ static void fuelgauge_work_handler( struct work_struct *work )
 }
 #endif
 
+static void full_comp_work_handler( struct work_struct *work )
+{
+	int avg_current = fg_read_avg_current();
+
+	if(avg_current >= 25) {  // Real threshold is 25.625mA
+		cancel_delayed_work(&full_comp_work);
+		schedule_delayed_work(&full_comp_work, 100);  // after 1sec
+	}
+	else {
+		printk("%s : full charge compensation start (avg_current : %d)\n", __func__, avg_current);
+		fg_fullcharged_compensation(is_recharging, 0);
+	}
+}
 
 #ifdef __EXTERNEL_CHARGER_IC__
 irqreturn_t ISL9220_STAT2_interrupt(int irq, void *ptr)
@@ -2852,7 +3079,7 @@ irqreturn_t SMB136_STAT_interrupt(int irq, void *ptr)
 void check_fullchaged(void)
 {
 	maxim_chg_status();
-	if(curent_device_type==PM_CHARGER_TA&& smb136_is_already_fullcharged()==1 && s3c_bat_info.bat_info.level >= 90)
+	if(curent_device_type==PM_CHARGER_TA && smb136_is_already_fullcharged()==1 && s3c_bat_info.bat_info.level >= 70)
 	{	
 		printk("%s: already fullcharged!!\n", __func__);
 		s3c_cable_charging();
@@ -2875,7 +3102,7 @@ static void fullcharging_work_handler(struct work_struct * work)
 		
 		if( TA_nCHG==1 && maxim_chg_status()==1)
 		{
-			if(smb136_is_fullcharging()==1 && s3c_bat_info.bat_info.level >= 90)
+			if(smb136_is_fullcharging()==1 && s3c_bat_info.bat_info.level >= 70)
 			{
 				is_fullcharing=1;
 			}
@@ -3025,6 +3252,7 @@ static int __devinit s3c_bat_probe(struct platform_device *pdev)
 	s3c_battery_initial = 1;
 	force_update = 0;
 	full_charge_flag = 0;
+	soc_restart_flag = 0;
 
 	if(maxim_lpm_chg_status() && check_UV_charging_case())
 		low_batt_boot_flag = 1;
@@ -3038,6 +3266,7 @@ static int __devinit s3c_bat_probe(struct platform_device *pdev)
 #endif
 	
 	INIT_DELAYED_WORK(&fullcharging_work, fullcharging_work_handler);
+	INIT_DELAYED_WORK(&full_comp_work, full_comp_work_handler);
 
 	s3c_bat_status_update(&s3c_power_supplies[CHARGER_BATTERY]);
 

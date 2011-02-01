@@ -316,7 +316,7 @@ static void sdhci_s3c_set_clock(struct sdhci_host *host, unsigned int clock)
 
 		ourhost->cur_clk = best_src;
 		host->max_clk = clk_get_rate(clk);
-		host->timeout_clk = sdhci_s3c_get_timeout_clk(host);
+		//host->timeout_clk = sdhci_s3c_get_timeout_clk(host);
 
 		ctrl = readl(host->ioaddr + S3C_SDHCI_CONTROL2);
 		ctrl &= ~S3C_SDHCI_CTRL2_SELBASECLK_MASK;
@@ -522,7 +522,8 @@ static int __devinit sdhci_s3c_probe(struct platform_device *pdev)
 	/* Setup quirks for the controller */
 	host->quirks |= SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC;
 	host->quirks |= SDHCI_QUIRK_BROKEN_CARD_PRESENT_BIT;
-	host->quirks |= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL;
+	//host->quirks |= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL;
+	host->quirks |= SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK;
 
 #ifndef CONFIG_MMC_SDHCI_S3C_DMA
 

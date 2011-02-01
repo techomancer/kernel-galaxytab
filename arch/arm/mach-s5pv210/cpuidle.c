@@ -30,6 +30,7 @@
 #include <mach/dma.h>
 #include <plat/regs-otg.h>
 #include <mach/regs-gpio.h>
+#include <asm/gpio.h>
 
 #define S5PC110_MAX_STATES	1
 
@@ -441,7 +442,7 @@ static int s5p_idle_bm_check(void)
 		|| check_dma_op() || check_usbotg_op()
 		|| check_i2c_op() || check_g3d_op()
 		|| check_idmapos() || check_rtcint()
-		|| !has_audio_wake_lock() || s5p_get_lpaudio_lock() != 0)
+		|| !has_audio_wake_lock() || s5p_get_lpaudio_lock() != 0 ||!gpio_get_value(GPIO_ACCESSORY_INT))
 		return 1;
 	else
 		return 0;

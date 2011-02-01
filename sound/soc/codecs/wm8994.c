@@ -1924,6 +1924,7 @@ static int wm8994_init(struct wm8994_priv *wm8994_private)
 #endif
 	wm8994->universal_mic_path = universal_wm8994_mic_paths;
 	wm8994->stream_state = PCM_STREAM_DEACTIVE;
+	wm8994->codec_state = DEACTIVE;
 	wm8994->cur_path = PLAYBACK_OFF;
 	wm8994->rec_path = MIC_OFF;
 	wm8994->fmradio_path = FMR_OFF;
@@ -1939,7 +1940,7 @@ static int wm8994_init(struct wm8994_priv *wm8994_private)
 	wm8994_write(codec,WM8994_SOFTWARE_RESET, 0x0000);
 
 	wm8994_write(codec, WM8994_POWER_MANAGEMENT_1, 0x3 << WM8994_VMID_SEL_SHIFT | WM8994_BIAS_ENA);
-	msleep(10);
+	msleep(50);
 	wm8994_write(codec, WM8994_POWER_MANAGEMENT_1, WM8994_VMID_SEL_NORMAL | WM8994_BIAS_ENA);
 
 	wm8994->hw_version = wm8994_read(codec, 0x100);	// Read Wm8994 version.

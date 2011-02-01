@@ -341,7 +341,9 @@ static irqreturn_t s3c24xx_serial_tx_chars(int irq, void *id)
 	while (!uart_circ_empty(xmit) && count-- > 0) {
 		if (rd_regl(port, S3C2410_UFSTAT) & ourport->info->tx_fifofull)
 			break;
+#if defined(CONFIG_KEYBOARD_P1)
              if(!((port->line == 2)&&g_keyboard))
+#endif
             {
                 wr_regb(port, S3C2410_UTXH, xmit->buf[xmit->tail]);
             }
@@ -426,6 +428,12 @@ static void s3c24xx_serial_shutdown(struct uart_port *port)
 		ourport->rx_claimed = 0;
 		rx_enabled(port) = 0;
 	}
+#if defined(CONFIG_KEYBOARD_P1)
+    if((port->line == 2)&&(g_keyboard))
+    {
+        send_keyevent(0);
+    }
+#endif
 }
 
 

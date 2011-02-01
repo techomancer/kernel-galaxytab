@@ -45,6 +45,10 @@ int dhd_msg_level;
 char fw_path[MOD_PARAM_PATHLEN];
 char nv_path[MOD_PARAM_PATHLEN];
 
+#ifdef CONFIG_CONTROL_PM
+bool g_PMcontrol;
+#endif
+
 /* Last connection success/failure status */
 uint32 dhd_conn_event;
 uint32 dhd_conn_status;
@@ -1323,7 +1327,7 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
  
 	/* Set PowerSave mode */
 	dhdcdc_set_ioctl(dhd, 0, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode));
-#ifdef CONFIG_TARGET_LOCALE_KOR
+#ifdef CONFIG_CONTROL_PM
 	DHD_ERROR(("[BCM4329] Power Save Mode disabled\n"));
 #endif /* CONFIG_TARGET_LOCALE_KOR */
  
@@ -1332,94 +1336,79 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 	dhdcdc_set_ioctl(dhd, 0, WLC_SET_VAR, iovbuf, sizeof(iovbuf));
 #else
 
-#ifdef CONFIG_TARGET_LOCALE_KOR
-	/* Set PowerSave mode */
+#ifdef CONFIG_CONTROL_PM
 	fp = filp_open(filepath, O_RDONLY, 0);	
-	if(IS_ERR(fp))// the file is not exist
-	{
+	if(IS_ERR(fp)) { // the file is not exist
 	    DHD_ERROR(("[BCM4329] /data/.psm.info not found\n"));
 
-	    /* Enable Power save features for CERTIFICATION*/
-    	power_mode = 1;
+    	power_mode = PM_FAST;
 
-	/* Set PowerSave mode */
-	dhdcdc_set_ioctl(dhd, 0, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode));
+		dhdcdc_set_ioctl(dhd, 0, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode));
 		DHD_ERROR(("[BCM4329] PM Enabled\n"));
-
+		g_PMcontrol = FALSE;
+		
 		fp = filp_open(filepath, O_RDWR | O_CREAT, 0666);
-		if(IS_ERR(fp)||(fp==NULL))
-		{
+		if(IS_ERR(fp)||(fp==NULL)) {
 			DHD_ERROR(("[WIFI] %s: File open error\n", filepath));
 		}
-		else
-		{
+		else {
 			char buffer[2]   = {0};
-			if(fp->f_mode & FMODE_WRITE)
-			{
+			if(fp->f_mode & FMODE_WRITE) {
 				sprintf(buffer,"1\n");
 				fp->f_op->write(fp, (const char *)buffer, sizeof(buffer), &fp->f_pos);
 				DHD_ERROR(("[BCM4329] Write /data/.psm.info -> 1\n"));
 			}
 		}
 	}
-	else
-	{
+	else {
 		char buffer[1]   = {0};
 
 		DHD_ERROR(("[BCM4329] /data/.psm.info found!!\n"));
 
 		kernel_read(fp, fp->f_pos, buffer, 1);
-		if(strncmp(buffer, "1",1)==0)
-		{
-			/* Set PowerSave mode */
+		if(strncmp(buffer, "1",1)==0) {
 			dhdcdc_set_ioctl(dhd, 0, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode));
 			DHD_ERROR(("[BCM4329] PM enabled\n"));
+			g_PMcontrol = FALSE;
 		}
-		else
-		{
-			/*Disable Power save features for WAPI CERTIFICATION*/
+		else {
 			power_mode = 0;
  
-			/* Set PowerSave mode */
 			dhdcdc_set_ioctl(dhd, 0, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode));
 			DHD_ERROR(("[BCM4329] PM disabled\n"));
  
-			/* Disable MPC */    
 			bcm_mkiovar("mpc", (char *)&power_mode, 4, iovbuf, sizeof(iovbuf));
 			dhdcdc_set_ioctl(dhd, 0, WLC_SET_VAR, iovbuf, sizeof(iovbuf));
+			g_PMcontrol = TRUE;
 		}
 	}
 
-	if(fp) {
+	if(fp) 
 		filp_close(fp, NULL);
-	}
-
+#if 0	
 	/* Set LCD mode */
 	fp = filp_open(lcdfilepath, O_RDONLY, 0);	
-	if(IS_ERR(fp))// the file is not exist
-	{
+	if(IS_ERR(fp)) { // the file is not exist
 	    DHD_ERROR(("[BCM4329] /data/.lcdmode.info not found\n"));
 
 		fp = filp_open(lcdfilepath, O_RDWR | O_CREAT, 0666);
-		if(IS_ERR(fp)||(fp==NULL))
-		{
+		if(IS_ERR(fp)||(fp==NULL)) {
 			DHD_ERROR(("[WIFI] %s: LCD mode file open error\n", filepath));
 		}
-		else
-		{
+		else {
 			char buffer[2]   = {0};
-			if(fp->f_mode & FMODE_WRITE)
-			{
+			if(fp->f_mode & FMODE_WRITE) {
 				sprintf(buffer,"0\n");
 				fp->f_op->write(fp, (const char *)buffer, sizeof(buffer), &fp->f_pos);
 				DHD_ERROR(("[BCM4329] Write /data/.lcdmode.info -> 0\n"));
 			}
 		}
 
-		if(fp) {
-		filp_close(fp, NULL);
-		}
+		if(fp) 
+			filp_close(fp, NULL);
 	}	
+#endif
+
 #else /* CONFIG_TARGET_LOCALE_KOR */
 	/* Set PowerSave mode */
 	dhdcdc_set_ioctl(dhd, 0, WLC_SET_PM, (char *)&power_mode, sizeof(power_mode));

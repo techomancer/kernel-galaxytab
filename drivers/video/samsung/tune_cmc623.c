@@ -76,21 +76,32 @@
 static Cmc623RegisterSet Cmc623_TuneSeq[CMC623_MAX_SETTINGS];
 #endif
 
+#define DELIMITER 0xff
+
 static const u8 all_regs_bank0[] = {
-	0x01, 0xb4, 0xb3, 0x10, 0x24, 0x0b, 0x12, 0x13, 0x14, 0x15, 
-	0x16, 0x17, 0x18, 0x19, 0x0f, 0x0d, 0x0e, 0x22, 0x23, 0x2c,
-	0x2d, 0x2e, 0x2f, 0x3a, 0x3b, 0x3c, 0x3f, 0x42, 0x49, 0x4a, 
-	0x4b, 0x4d, 0xc8, 0xc9, 0x42, 0x6e, 0x6f, 0x70, 0x71, 0x72,
-	0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7c, 0xc8,
-	0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf, 0xd0, 0xd1, 0xd2, 
-	0xd3, 0x28, 0x09, 0x26,
+	0xb4, 0xb3, 0x10, 0x24, 0x0b, 0x12, 0x13, 0x14, 0x15, 
+	0x16, 0x17, 0x18, 0x19, 0x0f, 0x0d, 0x0e, 0x22, 0x23, 0x49, 0x4a, 
+	0x4b, 0x4d, 0xc8, 0xc9, 0x42, 0x6e, 0x6f, 0x70, 0x71, 
+	0x76, 0x77, 0x78, 0x79, 0x7a, 0x28, 0x09, 0x26,
+	DELIMITER,
+	0x01,
+	0x2c, 0x2d, 0x2e, 0x2f, 0x3a, 0x3b, 0x3c, 0x3f, 0x42, 
+	DELIMITER,
+	0x72, 0x73, 0x74, 0x75, 0x7c, 
+	DELIMITER,
+	0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf, 0xd0, 0xd1, 0xd2, 0xd3,
+	DELIMITER,
 };
 
 static const u8 all_regs_bank1[] = {
 	0x09, 0x0a, 0x0b, 0x0c, 0x01, 0x06, 0x07, 0x65, 0x68, 0x6c,
-	0x6d, 0x6e, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+	0x6d, 0x6e, 
+	DELIMITER,
+	0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
 	0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31,
 	0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
+	DELIMITER,
+
 };
 
 #if 1 
@@ -218,6 +229,7 @@ static int current_cmc623_OutDoor_OnOff = FALSE;
 static int current_cmc623_CABC_OnOff = FALSE;
 
 static int setting_first = FALSE;
+static int setting_boot = FALSE;
 static int cmc623_bypass_mode = FALSE;
 static int current_autobrightness_enable = FALSE;
 static int cmc623_current_region_enable = FALSE;
@@ -238,9 +250,12 @@ typedef enum
 {
 	LCD_TYPE_VA,
 	LCD_TYPE_PLS,
-//	LCD_TYPE_T3,
-//	LCD_TYPE_T4,
-//	LCD_TYPE_T5,	
+	LCD_TYPE_VA50,
+	LCD_TYPE_TN,
+	LCD_TYPE_FFS,	
+	LCD_TYPE_LCDPLS,	
+	LCD_TYPE_T7,	
+	LCD_TYPE_T8,	
 	LCD_TYPE_MAX,
 }Lcd_Type;
 extern Lcd_Type lcd_type;
@@ -276,13 +291,18 @@ void cmc623_reg_unmask(void)
 
 void cmc623_Color_White_Change(int value, int finalize)
 {
-	mDNIe_data_type *mode = cmc623_white_values[((value+2)*LCD_TYPE_MAX*2)+(LCD_TYPE_MAX*lcd_type)+cmc623_state.cabc_enabled];
+//	mDNIe_data_type *mode = cmc623_white_values[((value+2)*LCD_TYPE_MAX*2)+(2*lcd_type)+cmc623_state.cabc_enabled];
+	mDNIe_data_type *mode = cmc623_white_val_values[(2*lcd_type)+cmc623_state.cabc_enabled];
+	mode += (value+4);
 	cmc623_state.white = value;
-	while ( mode->addr != END_SEQ)
-	{
-		cmc623_I2cWrite16(mode->addr, mode->data);
-		mode++;
-	}
+
+#ifdef CMC623_TUNING
+	printk(KERN_ERR "%s ignore for tuning mode\n", __func__);
+	return;
+#endif
+
+	cmc623_I2cWrite16(0x0000, 0x0000);		//bank
+	cmc623_I2cWrite16(mode->addr, mode->data);
 	
 	if(finalize == TRUE)
 	{
@@ -292,8 +312,14 @@ void cmc623_Color_White_Change(int value, int finalize)
 
 void cmc623_Color_Black_Change(int value, int finalize)
 {
-	mDNIe_data_type *mode = cmc623_black_values[((value+2)*LCD_TYPE_MAX*2)+(LCD_TYPE_MAX*lcd_type)+cmc623_state.cabc_enabled];
+	mDNIe_data_type *mode = cmc623_black_values[((value+4)*LCD_TYPE_MAX*2)+(2*lcd_type)+cmc623_state.cabc_enabled];
 	cmc623_state.black = value;
+
+#ifdef CMC623_TUNING
+	printk(KERN_ERR "%s ignore for tuning mode\n", __func__);
+	return;
+#endif
+
 	while ( mode->addr != END_SEQ)
 	{
 		cmc623_I2cWrite16(mode->addr, mode->data);
@@ -308,13 +334,18 @@ void cmc623_Color_Black_Change(int value, int finalize)
 
 void cmc623_Color_Saturation_Change(int value, int finalize)
 {
-	mDNIe_data_type *mode = cmc623_saturation_values[((value+2)*LCD_TYPE_MAX*2)+(LCD_TYPE_MAX*lcd_type)+cmc623_state.cabc_enabled];
+//	mDNIe_data_type *mode = cmc623_saturation_values[((value+2)*LCD_TYPE_MAX*2)+(2*lcd_type)+cmc623_state.cabc_enabled];
+	mDNIe_data_type *mode = cmc623_saturation_val_values[(2*lcd_type)+cmc623_state.cabc_enabled];
+	mode += (value+4);
 	cmc623_state.saturation = value;
-	while ( mode->addr != END_SEQ)
-	{
-		cmc623_I2cWrite16(mode->addr, mode->data);
-		mode++;
-	}
+
+#ifdef CMC623_TUNING
+	printk(KERN_ERR "%s ignore for tuning mode\n", __func__);
+	return;
+#endif
+
+	cmc623_I2cWrite16(0x0000, 0x0000);		//bank
+	cmc623_I2cWrite16(mode->addr, mode->data);
 	
 	if(finalize == TRUE)
 	{
@@ -381,7 +412,7 @@ void cmc623_Mode_Change(mDNIe_data_type *mode, int cabc_enable)
 		else
 		{
 			//Manual brightness setting
-			if(setting_first)
+			if(setting_first&&!setting_boot)
 				cmc623_manual_pwm_brightness_reg_nosync(cmc623_state.brightness);
 			else
 				cmc623_manual_pwm_brightness_reg(cmc623_state.brightness);
@@ -2659,15 +2690,29 @@ static ssize_t show_regs_store(struct device *dev, struct device_attribute *attr
 		printk("BANK0\n");
 		for(i=0;i<ARRAY_SIZE(all_regs_bank0);i++)
 			{
-			ret = cmc623_I2cRead16(all_regs_bank0[i], &data2);
-			printk("addr:0x%04x, data:0x%04x\n", all_regs_bank0[i], data2);
+			if(all_regs_bank0[i] == DELIMITER)
+				{
+				printk("------------------------\n");
+				}
+			else
+				{
+				ret = cmc623_I2cRead16(all_regs_bank0[i], &data2);
+				printk("addr:0x%04x, data:0x%04x\n", all_regs_bank0[i], data2);
+				}
 			}
 		ret = cmc623_I2cWrite16(0x00, 0x0001);
 		printk("BANK1\n");
 		for(i=0;i<ARRAY_SIZE(all_regs_bank1);i++)
 			{
-			ret = cmc623_I2cRead16(all_regs_bank1[i], &data2);
-			printk("addr:0x%04x, data:0x%04x\n", all_regs_bank1[i], data2);
+			if(all_regs_bank1[i] == DELIMITER)
+				{
+				printk("------------------------\n");
+				}
+			else
+				{
+				ret = cmc623_I2cRead16(all_regs_bank1[i], &data2);
+				printk("addr:0x%04x, data:0x%04x\n", all_regs_bank1[i], data2);
+				}
 			}
 		}
 	else
@@ -2745,12 +2790,15 @@ static DEVICE_ATTR(set_bypass, 0666, set_bypass_show, set_bypass_store);
 
 static ssize_t color_white_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf,"%u\n",cmc623_state.white);
+	return sprintf(buf,"%d\n",cmc623_state.white);
 }
 
 static ssize_t color_white_store(struct device *dev, struct device_attribute *attr,const char *buf, size_t size)
 {
 	sscanf(buf, "%d", &cmc623_state.white);
+
+	printk(KERN_NOTICE "%s:%d\n", __func__, cmc623_state.white);
+
 	cmc623_Color_White_Change(cmc623_state.white,true);
 
 	return size;
@@ -2761,15 +2809,17 @@ static DEVICE_ATTR(color_white, 0666, color_white_show, color_white_store);
 static ssize_t color_black_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 #if defined(CONFIG_TARGET_LOCALE_NTT)
-	return sprintf(buf,"%u\n",-cmc623_state.black);
+	return sprintf(buf,"%d\n",-cmc623_state.black);
 #else
-	return sprintf(buf,"%u\n",cmc623_state.black);
+	return sprintf(buf,"%d\n",cmc623_state.black);
 #endif
 }
 
 static ssize_t color_black_store(struct device *dev, struct device_attribute *attr,const char *buf, size_t size)
 {
 	sscanf(buf, "%d", &cmc623_state.black);
+
+	printk(KERN_NOTICE "%s:%d\n", __func__, cmc623_state.black);
 
 #if defined(CONFIG_TARGET_LOCALE_NTT)
 	cmc623_state.black = -(cmc623_state.black);
@@ -2784,12 +2834,15 @@ static DEVICE_ATTR(color_black, 0666, color_black_show, color_black_store);
 
 static ssize_t color_saturation_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf,"%u\n",cmc623_state.saturation);
+	return sprintf(buf,"%d\n",cmc623_state.saturation);
 }
 
 static ssize_t color_saturation_store(struct device *dev, struct device_attribute *attr,const char *buf, size_t size)
 {
 	sscanf(buf, "%d", &cmc623_state.saturation);
+
+	printk(KERN_NOTICE "%s:%d\n", __func__, cmc623_state.saturation);
+
 	cmc623_Color_Saturation_Change(cmc623_state.saturation,true);
 
 	return size;
@@ -2836,7 +2889,9 @@ static int cmc623_i2c_probe(struct i2c_client *client, const struct i2c_device_i
 	cmc623_set_tuning();	//for test
 #endif
 	setting_first = TRUE;
+	setting_boot = TRUE;
 	cmc623_cabc_enable(cmc623_state.cabc_enabled);
+	setting_boot = FALSE;
 	setting_first = FALSE;
 	
 //	ret = cmc623_gamma_set();                             // P1_LSJ : DE19

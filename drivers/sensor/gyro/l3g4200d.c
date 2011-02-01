@@ -35,6 +35,11 @@
 #include <linux/i2c/l3g4200d.h>
 #include <linux/delay.h>
 
+#include <linux/interrupt.h>
+#include <linux/wakelock.h>
+#include <linux/input.h>
+
+#define	GYRO_ENABLED 1
 
 #define L3G4200D_MAJOR   102
 #define L3G4200D_MINOR   4
@@ -74,7 +79,7 @@
 #define SHIFT_ADJ_4G		3
 #define SHIFT_ADJ_8G		2*/
 
-#define DEBUG 1
+#define DEBUG 0
 
 static unsigned char reg_backup[5];
 static unsigned int fd_cnt = 0;
@@ -98,6 +103,14 @@ struct l3g4200d_t {
 struct l3g4200d_data {
 	struct i2c_client *client;
 	struct l3g4200d_platform_data *pdata;
+
+	struct work_struct work_gyro;
+	struct hrtimer timer;
+	ktime_t gyro_poll_delay;
+	u8 state;
+	struct mutex power_lock;
+	struct workqueue_struct *wq;
+	struct input_dev *gyro_input_dev;
 	/* u8 shift_adj; */
 };
 
@@ -112,6 +125,89 @@ static char l3g4200d_i2c_write(unsigned char reg_addr,
 static char l3g4200d_i2c_read(unsigned char reg_addr,
 				   unsigned char *data,
 				   unsigned char len);
+static void l3g_gyro_enable(void);
+static void l3g_gyro_disable(void);
+
+
+static void l3g_gyro_enable(void);
+static void l3g_gyro_disable(void);
+static int device_init(void);
+
+//#define L3G4200D_PROC_FS
+#ifdef L3G4200D_PROC_FS
+
+
+
+#include <linux/proc_fs.h>
+
+#define DRIVER_PROC_ENTRY		"driver/l3g4200d"
+#if 0
+int l3g4200d_read_gyro_values(struct l3g4200d_t *data);
+
+static int l3g4200d_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	char *p = page;
+	int len = 0;
+	struct l3g4200d_t gyro_data;
+	
+	/* TO DO */
+	// restore backup register
+	l3g4200d_i2c_write(CTRL_REG1, &reg_backup[0], 5);
+	l3g4200d_read_gyro_values(&gyro_data);
+
+	p += sprintf(p,"[l3g4200d_proc_read]\nX axis: %d\nY axis: %d\nZ axis: %d\n" , gyro_data.y, gyro_data.p, gyro_data.r);
+	len = (p - page) - off;
+	if (len < 0) {
+		len = 0;
+	}
+
+	*eof = (len <= count) ? 1 : 0;
+	*start = page + off;
+	return len;
+}
+#else
+
+static int l3g4200d_proc_read(char *page, char **start, off_t off, int count, int *eof, void *data)
+{
+	char *p = page;
+	int len = 0;
+	int i;
+	
+	mutex_lock(&gyro->power_lock);
+	printk("l3g4200d_proc_read\n");
+
+	device_init();	
+	mdelay(300);
+	
+	/* TO DO */
+	// restore backup register
+	l3g4200d_i2c_read(CTRL_REG1, &reg_backup[0], 5);
+
+	for(i = 0; i < 5; i++)
+	{
+		sprintf(p,"[l3g4200d_suspend] backup reg[%d] = %2x\n", i, reg_backup[i]);
+		printk("[l3g4200d_suspend] backup reg[%d] = %2x\n", i, reg_backup[i]);
+	}
+	gyro->state |= GYRO_ENABLED;
+	l3g_gyro_enable();
+
+	mutex_unlock(&gyro->power_lock);
+
+	len = (p - page) - off;
+	if (len < 0) {
+		len = 0;
+	}
+
+	printk("l3g4200d_proc_read: success full\n");
+
+	*eof = (len <= count) ? 1 : 0;
+	*start = page + off;
+	return len;
+}
+#endif
+
+#endif	//L3G4200D_PROC_FS
+
 
 /* set l3g4200d digital gyroscope bandwidth */
 int l3g4200d_set_bandwidth(char bw)
@@ -221,7 +317,7 @@ static int device_init(void)
 	buf[0] = 0x6f;
 	buf[1] = 0x00;
 	buf[2] = 0x00;
-	buf[3] = 0x00;
+	buf[3] = 0x10;
 	buf[4] = 0x00;
 	res = l3g4200d_i2c_write(CTRL_REG1, &buf[0], 5);
 	return res;
@@ -560,8 +656,7 @@ static int l3g4200d_open(struct inode *inode, struct file *file)
 		#endif
 		return -1;
 	}
-	device_init();
-	
+	device_init();	
 	mdelay(300);
 	
 	fd_cnt++;
@@ -612,7 +707,6 @@ static int l3g4200d_ioctl(struct inode *inode, struct file *file,
 	}
 
 	/* cmd mapping */
-
 	switch (cmd) {
 
 	/*case L3G4200D_SELFTEST:
@@ -624,30 +718,33 @@ static int l3g4200d_ioctl(struct inode *inode, struct file *file,
 			#if DEBUG
 			printk(KERN_ERR "copy_from_user error\n");
 			#endif
-			return -EFAULT;
+			err = -EFAULT;
+			break;
 		}
 		err = l3g4200d_set_range(*data);
-		return err;
+		break;
 
 	case L3G4200D_SET_MODE:
 		if (copy_from_user(data, (unsigned char *)arg, 1) != 0) {
 			#if DEBUG
 			printk(KERN_ERR "copy_to_user error\n");
 			#endif
-			return -EFAULT;
+			err = -EFAULT;
+			break;
 		}
 		err = l3g4200d_set_mode(*data);
-		return err;
+		break;
 
 	case L3G4200D_SET_BANDWIDTH:
 		if (copy_from_user(data, (unsigned char *)arg, 1) != 0) {
 			#if DEBUG
 			printk(KERN_ERR "copy_from_user error\n");
 			#endif
-			return -EFAULT;
+			err = -EFAULT;
+			break;
 		}
 		err = l3g4200d_set_bandwidth(*data);
-		return err;
+		break;
 
 	case L3G4200D_READ_GYRO_VALUES:
 		err = l3g4200d_read_gyro_values(
@@ -658,13 +755,17 @@ static int l3g4200d_ioctl(struct inode *inode, struct file *file,
 			#if DEBUG
 			printk(KERN_ERR "copy_to error\n");
 			#endif
-			return -EFAULT;
+			err = -EFAULT;
+			break;
 		}
-		return err;
+		break;
 
 	default:
-		return 0;
+		break;
 	}
+
+	return err;
+
 }
 
 
@@ -708,10 +809,135 @@ static int l3g4200d_validate_pdata(struct l3g4200d_data *gyro)
 	return 0;
 }
 
+
+/////////////////////////////////////////////////////////////////////////////////////
+static void l3g_gyro_enable(void)
+{
+	printk("starting poll timer, delay %lldns\n", ktime_to_ns(gyro->gyro_poll_delay));
+	hrtimer_start(&gyro->timer, gyro->gyro_poll_delay, HRTIMER_MODE_REL);
+}
+
+static void l3g_gyro_disable(void)
+{
+	printk("cancelling poll timer\n");
+	hrtimer_cancel(&gyro->timer);
+	cancel_work_sync(&gyro->work_gyro);
+}
+
+static ssize_t poll_delay_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%lld\n", ktime_to_ns(gyro->gyro_poll_delay));
+}
+
+static ssize_t poll_delay_store(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+	int64_t new_delay;
+	int err;
+
+	err = strict_strtoll(buf, 10, &new_delay);
+	if (err < 0)
+		return err;
+
+	printk("new delay = %lldns, old delay = %lldns\n",
+		    new_delay, ktime_to_ns(gyro->gyro_poll_delay));
+	mutex_lock(&gyro->power_lock);
+	if (new_delay != ktime_to_ns(gyro->gyro_poll_delay)) 
+	{
+		l3g_gyro_disable();
+		gyro->gyro_poll_delay = ns_to_ktime(new_delay);
+		if (gyro->state & GYRO_ENABLED) {
+			l3g_gyro_enable();
+		}
+	}
+	mutex_unlock(&gyro->power_lock);
+
+	return size;
+}
+
+static ssize_t gyro_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", (gyro->state & GYRO_ENABLED) ? 1 : 0);
+}
+
+
+static ssize_t gyro_enable_store(struct device *dev,struct device_attribute *attr, const char *buf, size_t size)
+{
+	bool new_value;
+
+	if (sysfs_streq(buf, "1"))
+		new_value = true;
+	else if (sysfs_streq(buf, "0"))
+		new_value = false;
+	else {
+		pr_err("%s: invalid value %d\n", __func__, *buf);
+		return -EINVAL;
+	}
+
+	mutex_lock(&gyro->power_lock);
+	printk("new_value = %d, old state = %d\n", new_value, (gyro->state & GYRO_ENABLED) ? 1 : 0);
+	if (new_value && !(gyro->state & GYRO_ENABLED)) 
+	{
+		gyro->state |= GYRO_ENABLED;
+		device_init();	
+		mdelay(300);
+
+		l3g_gyro_enable();
+	} else if (!new_value && (gyro->state & GYRO_ENABLED)) {
+		l3g_gyro_disable();
+		l3g4200d_set_mode(PM_OFF);
+		gyro->state = 0;
+	}
+	mutex_unlock(&gyro->power_lock);
+	return size;
+}
+
+static DEVICE_ATTR(poll_delay, S_IRUGO | S_IWUSR | S_IWGRP,
+		   poll_delay_show, poll_delay_store);
+
+static struct device_attribute dev_attr_gyro_enable =
+	__ATTR(enable, S_IRUGO | S_IWUSR | S_IWGRP,
+	       gyro_enable_show, gyro_enable_store);
+
+static struct attribute *gyro_sysfs_attrs[] = {
+	&dev_attr_gyro_enable.attr,
+	&dev_attr_poll_delay.attr,
+	NULL
+};
+
+static struct attribute_group gyro_attribute_group = {
+	.attrs = gyro_sysfs_attrs,
+};
+
+static void l3g_work_func_gyro(struct work_struct *work)
+{
+	struct l3g4200d_t gyro_data;
+	int err;
+
+	err = l3g4200d_read_gyro_values(&gyro_data);
+
+	input_report_abs(gyro->gyro_input_dev, ABS_HAT3X, gyro_data.y);
+	input_report_abs(gyro->gyro_input_dev, ABS_HAT3Y, gyro_data.p);
+	input_report_abs(gyro->gyro_input_dev, ABS_PRESSURE, gyro_data.r);
+	input_sync(gyro->gyro_input_dev);
+}
+
+
+/* This function is for light sensor.  It operates every a few seconds.
+ * It asks for work to be done on a thread because i2c needs a thread
+ * context (slow and blocking) and then reschedules the timer to run again.
+ */
+static enum hrtimer_restart gyro_timer_func(struct hrtimer *timer)
+{
+	queue_work(gyro->wq, &gyro->work_gyro);
+	hrtimer_forward_now(&gyro->timer, gyro->gyro_poll_delay);
+	return HRTIMER_RESTART;
+}
+
 static int l3g4200d_probe(struct i2c_client *client,
 			       const struct i2c_device_id *devid)
 {
 	struct l3g4200d_data *data;
+	struct input_dev *input_dev;
 	struct device *dev;
 	int err = 0;
 	int tempvalue;
@@ -847,7 +1073,80 @@ static int l3g4200d_probe(struct i2c_client *client,
 	
 	printk(KERN_INFO "%s : L3G4200D device created successfully\n", __func__);
 
+//////////////////////////////////////////////////////////////////////////////
+	mutex_init(&gyro->power_lock);
+
+	/* hrtimer settings.  we poll for light values using a timer. */
+	hrtimer_init(&gyro->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	gyro->gyro_poll_delay = ns_to_ktime(240 * NSEC_PER_MSEC);
+	gyro->timer.function = gyro_timer_func;
+
+	/* the timer just fires off a work queue request.  we need a thread
+	   to read the i2c (can be slow and blocking). */
+	gyro->wq = create_singlethread_workqueue("l3g_wq");
+	if (!gyro->wq) {
+		err = -ENOMEM;
+		printk("%s: could not create workqueue\n", __func__);
+		goto err_create_workqueue;
+	}
+	/* this is the thread function we run on the work queue */
+	INIT_WORK(&gyro->work_gyro, l3g_work_func_gyro);
+
+///////////////////////////////////////////////////////////////////////////////////
+	/* allocate gyro input_device */
+	input_dev = input_allocate_device();
+	if (!input_dev) {
+		printk("%s: could not allocate input device\n", __func__);
+		err = -ENOMEM;
+		goto err_input_allocate_device_light;
+	}
+	input_set_drvdata(input_dev, gyro);
+	input_dev->name = "gyro";
+
+	set_bit(EV_ABS, input_dev->evbit);	
+	/* 32768 == 1g, range -4g ~ +4g */
+	/* gyro x-axis */
+	input_set_capability(input_dev, EV_ABS, ABS_HAT3X);
+	input_set_abs_params(input_dev, ABS_HAT3X, -32768, 32768, 0, 0);
+	/* gyro y-axis */
+	input_set_capability(input_dev, EV_ABS, ABS_HAT3Y);
+	input_set_abs_params(input_dev, ABS_HAT3Y, -32768, 32768, 0, 0);
+	/* gyro z-axis */
+	input_set_capability(input_dev, EV_ABS, ABS_PRESSURE);
+	input_set_abs_params(input_dev, ABS_PRESSURE, -32768, 32768, 0, 0);
+
+	printk("registering gyro input device\n");
+	err = input_register_device(input_dev);
+	if (err < 0) {
+		printk("%s: could not register input device\n", __func__);
+		input_free_device(input_dev);
+		goto err_input_register_device_light;
+	}
+	gyro->gyro_input_dev = input_dev;
+
+
+	err = sysfs_create_group(&input_dev->dev.kobj,&gyro_attribute_group);
+	if (err) {
+		printk("Creating l3g4200d attribute group failed");
+		goto error_device;
+	}
+
+#ifdef L3G4200D_PROC_FS
+	create_proc_read_entry(DRIVER_PROC_ENTRY, 0, 0, l3g4200d_proc_read, NULL);
+#endif	//BMA222_PROC_FS
+//////////////////////////////////////////////////////////////////////////////	
+	l3g4200d_set_range(L3G4200D_FS_500DPS); 
+	
 	return 0;
+
+error_device:
+	sysfs_remove_group(&input_dev->dev.kobj, &gyro_attribute_group);
+err_input_register_device_light:
+	input_unregister_device(gyro->gyro_input_dev);
+err_input_allocate_device_light:	
+	destroy_workqueue(gyro->wq);
+err_create_workqueue:
+	mutex_destroy(&gyro->power_lock);
 error_destroy:
 	class_destroy(l3g_gyro_dev_class);
 out_unreg_chrdev:
@@ -868,6 +1167,18 @@ exit:
 static int l3g4200d_remove(struct i2c_client *client)
 {
 	struct l3g4200d_data *lis = i2c_get_clientdata(client);
+
+	if (gyro->state & GYRO_ENABLED)
+	{
+		gyro->state = 0;
+		l3g_gyro_disable();
+	}
+	sysfs_remove_group(&gyro->gyro_input_dev->dev.kobj, &gyro_attribute_group);
+	input_unregister_device(gyro->gyro_input_dev);
+
+	destroy_workqueue(gyro->wq);
+	mutex_destroy(&gyro->power_lock);
+
 	#if DEBUG
 	printk(KERN_INFO "L3G4200D driver removing\n");
 	#endif
@@ -892,10 +1203,12 @@ static int l3g4200d_suspend(struct i2c_client *client, pm_message_t state)
 	printk(KERN_INFO "l3g4200d_suspend\n");
 	#endif
 	
+	if (gyro->state & GYRO_ENABLED) 
+		l3g_gyro_disable();
 	/* TO DO */
 	// before starting self-test, backup register
 	l3g4200d_i2c_read(CTRL_REG1, &reg_backup[0], 5);
-	
+
 #if DEBUG
 	for(i = 0; i < 5; i++)
 		printk("[l3g4200d_suspend] backup reg[%d] = %2x\n", i, reg_backup[i]);
@@ -915,7 +1228,10 @@ static int l3g4200d_resume(struct i2c_client *client)
 	/* TO DO */
 	// restore backup register
 	l3g4200d_i2c_write(CTRL_REG1, &reg_backup[0], 5);
-	
+
+	if (gyro->state & GYRO_ENABLED)
+		l3g_gyro_enable();
+
 #if DEBUG
 	for(i = 0; i < 5; i++)
 		printk("[l3g4200d_resume] backup reg[%d] = %2x\n", i, reg_backup[i]);

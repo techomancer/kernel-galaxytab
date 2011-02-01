@@ -18,6 +18,12 @@
 /*
  * Driver information
  */
+ enum s5k6aafx_runmode {
+	S5K6AAFX_RUNMODE_NOTREADY,
+	S5K6AAFX_RUNMODE_IDLE, 
+	S5K6AAFX_RUNMODE_RUNNING, 
+};
+
 struct s5k6aafx_state {
 	struct v4l2_subdev sd;
 	/*
@@ -28,6 +34,7 @@ struct s5k6aafx_state {
 	 */
 	struct v4l2_pix_format req_fmt;
 	struct v4l2_pix_format set_fmt;
+	enum s5k6aafx_runmode runmode;
 	int vt_mode;
 	int fps;
 
@@ -36,8 +43,8 @@ struct s5k6aafx_state {
 	int anti_banding;
 #endif
 	//hmin84.park -  10.07.06
-    	int check_dataline;
-
+	int check_dataline;
+	int set_vhflip;
 };
 
 static inline struct s5k6aafx_state *to_state(struct v4l2_subdev *sd)
@@ -6214,32 +6221,6 @@ static unsigned long  s5k6aafx_pattern_off[] = {
 0x0F120000,
 0x002A3100,
 0x0F120000,	// Colorbar pattern
-
-0xFCFCD000,
-0x00287000, 
-
-0x002A10EE,
-0x0F12097A,  //senHal_uMinColsNoBin *FACTORY ONLY *No Delete
-
-0x002A021C,
-0x0F120000,  //REG_TC_GP_ActivePrevConfig
-
-0x002A0220,
-0x0F120001,  //REG_TC_GP_PrevOpenAfterChange
-
-0x002A01F8,
-0x0F120001,  //REG_TC_GP_NewConfigSync
-
-0x002A021E,
-0x0F120001,  //REG_TC_GP_PrevConfigChanged
-
-0x002A01F0,
-0x0F120001,  //REG_TC_GP_EnablePreview
-
-0x0F120001,  //REG_TC_GP_EnablePreviewChanged
-
-0xffff0064,
-
 };
 
 static unsigned long s5k6aafx_vt_7fps[] =

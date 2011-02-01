@@ -57,17 +57,30 @@
 #define FALSE 0
 #endif
 
+#define ADC_LOWER_LIMIT_PLS_TYPE	3850
+#define ADC_LOWER_LIMIT_T8_TYPE	3400
+#define ADC_LOWER_LIMIT_LCDPLS_TYPE	2900
+#define ADC_LOWER_LIMIT_VA50_TYPE	2230
+#define ADC_LOWER_LIMIT_FFS_TYPE	1600
+#define ADC_LOWER_LIMIT_TN_TYPE		900
+#define ADC_LOWER_LIMIT_T7_TYPE	350
+#define ADC_LOWER_LIMIT_VA_TYPE		0
+
 typedef enum
 {
 	LCD_TYPE_VA,
 	LCD_TYPE_PLS,
-//	LCD_TYPE_T3,
-//	LCD_TYPE_T4,
-//	LCD_TYPE_T5,
+	LCD_TYPE_VA50,
+	LCD_TYPE_TN,
+	LCD_TYPE_FFS,
+	LCD_TYPE_LCDPLS,
+	LCD_TYPE_T7,
+	LCD_TYPE_T8,
 	LCD_TYPE_MAX,
 }Lcd_Type;
 
 Lcd_Type lcd_type = LCD_TYPE_VA;
+static Lcd_Type lcd_vendor_by_adc = LCD_TYPE_MAX;
 extern int s3c_adc_get_adc_data(int channel);
 #define SEC_LCD_ADC_CHANNEL 2
 
@@ -375,6 +388,93 @@ static ssize_t lightsensor_file_state_store(struct device *dev,
 
 static DEVICE_ATTR(lightsensor_file_state,0666, lightsensor_file_state_show, lightsensor_file_state_store);
 
+static const char lcdtype_name[][64] = {
+		"SMD_LMS700JF03",
+		"HYD_HV070WS1",
+		"SMD_LMS700JF06",
+		"HAN_HSD070PFW1",
+		"BOE_HV070WSA",
+		"SEC_LTN070NL01",
+		"XXX_T7",
+		"XXX_T8"
+		};
+
+static ssize_t lcdtype_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	printk(KERN_INFO "%s\n", __func__);
+
+	switch(lcd_vendor_by_adc) {
+	case LCD_TYPE_PLS:
+		pr_info("type(PLS): %s\n",lcdtype_name[1]);
+		return sprintf(buf,lcdtype_name[1]);
+		break;
+	case LCD_TYPE_VA50:
+		pr_info("type(VA50): %s\n",lcdtype_name[2]);
+		return sprintf(buf,lcdtype_name[2]);
+		break;
+	case LCD_TYPE_TN:
+		pr_info("type(TN): %s\n",lcdtype_name[3]);
+		return sprintf(buf,lcdtype_name[3]);
+		break;
+	case LCD_TYPE_FFS:
+		pr_info("type(FFS): %s\n",lcdtype_name[4]);
+		return sprintf(buf,lcdtype_name[4]);
+		break;
+	case LCD_TYPE_LCDPLS:
+		pr_info("type(LCDPLS): %s\n",lcdtype_name[5]);
+		return sprintf(buf,lcdtype_name[5]);
+		break;
+	case LCD_TYPE_T7:
+		pr_info("type(T7): %s\n",lcdtype_name[6]);
+		return sprintf(buf,lcdtype_name[6]);
+		break;
+	case LCD_TYPE_T8:
+		pr_info("type(T8): %s\n",lcdtype_name[7]);
+		return sprintf(buf,lcdtype_name[7]);
+		break;
+	case LCD_TYPE_VA:
+	default:
+		pr_info("type(VA70): %s\n",lcdtype_name[0]);
+		return sprintf(buf,lcdtype_name[0]);
+		break;
+	}
+
+}
+
+static ssize_t lcdtype_store(struct device *dev,
+        struct device_attribute *attr, const char *buf, size_t size)
+{
+	printk(KERN_NOTICE "%s:%s\n", __func__, buf);
+
+	return size;
+}
+
+static DEVICE_ATTR(lcdtype,0644, lcdtype_show, lcdtype_store);
+
+static ssize_t lcdid_adc_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int lcd_adc = 0;
+	printk(KERN_INFO "%s \n", __func__);
+
+	lcd_adc = s3c_adc_get_adc_data(SEC_LCD_ADC_CHANNEL);
+	pr_info("lcd_adc : %d\n",lcd_adc);
+
+	return sprintf(buf,"%u\n", lcd_adc);
+}
+
+static ssize_t lcdid_adc_store(struct device *dev,
+        struct device_attribute *attr, const char *buf, size_t size)
+{
+	printk(KERN_NOTICE "%s:%s\n", __func__, buf);
+
+	return size;
+}
+
+static DEVICE_ATTR(lcdid_adc,0644, lcdid_adc_show, lcdid_adc_store);
+
+extern struct class *sec_class;
+struct device *sec_lcd_dev;
+
 static int __init lms700_probe(struct platform_device *pdev)
 {
 	int ret=0;
@@ -415,6 +515,17 @@ static int __init lms700_probe(struct platform_device *pdev)
 	if (device_create_file(switch_cabcset_dev, &dev_attr_lightsensor_file_state) < 0)
 		pr_err("Failed to create device file(%s)!\n", dev_attr_lightsensor_file_state.attr.name);
 
+	sec_lcd_dev = device_create(sec_class, NULL, 0, NULL, "sec_lcd");
+	if (IS_ERR(sec_lcd_dev))
+		pr_err("Failed to create device(sec_lcd_dev)!\n");
+
+	if (device_create_file(sec_lcd_dev, &dev_attr_lcdtype) < 0)
+		pr_err("Failed to create device file(%s)!\n", dev_attr_lcdtype.attr.name);
+
+	if (device_create_file(sec_lcd_dev, &dev_attr_lcdid_adc) < 0)
+		pr_err("Failed to create device file(%s)!\n", dev_attr_lcdid_adc.attr.name);
+
+
 #ifdef CONFIG_FB_S3C_MDNIE
 	init_mdnie_class();  //set mDNIe UI mode, Outdoormode
 #endif
@@ -427,33 +538,68 @@ static int __init lms700_probe(struct platform_device *pdev)
 
 	pr_info("HWREV : %d\n",HWREV);
 	//check lcd type
+//#if defined(CONFIG_TARGET_LOCALE_KOR)
+//	if(HWREV >= 14)		// above rev1.2 (KOR)
+//	{
+//		lcd_type = LCD_TYPE_PLS;
+//		lcd_adc = s3c_adc_get_adc_data(SEC_LCD_ADC_CHANNEL);
+//		pr_info("lcd_adc : %d\n",lcd_adc);
+//	}
+//	else
+//	{
+//		lcd_type = LCD_TYPE_VA;
+//		lcd_adc = 0;
+//	}
+//#elif defined(CONFIG_TARGET_LOCALE_VZW) 
+//	if(HWREV >= 7)		
+//	{
+//		lcd_type = LCD_TYPE_PLS;
+//		lcd_adc = s3c_adc_get_adc_data(SEC_LCD_ADC_CHANNEL);
+//		pr_info("lcd_adc : %d\n",lcd_adc);
+//	}
+//	else
+//	{
+//		lcd_type = LCD_TYPE_VA;
+//		lcd_adc = 0;
+//	}
 #if defined(CONFIG_TARGET_LOCALE_KOR)
 	if(HWREV >= 14)		// above rev1.2 (KOR)
-	{
-		lcd_type = LCD_TYPE_PLS;
-	}
-	else
-	{
-		lcd_type = LCD_TYPE_VA;
-	}
 #elif defined(CONFIG_TARGET_LOCALE_VZW) 
 	if(HWREV >= 7)		
-	{
-		lcd_type = LCD_TYPE_PLS;
-	}
-	else
-	{
-		lcd_type = LCD_TYPE_VA;
-	}
 #else
 // EUR and HKTW and HKTW_FET and USAGSM and etc
 	if(HWREV >= 16)		// above rev1.0 (EUR)
+#endif
 	{
 		lcd_adc = s3c_adc_get_adc_data(SEC_LCD_ADC_CHANNEL);
 		pr_info("lcd_adc : %d\n",lcd_adc);
-		if(lcd_adc > 2000)
+		if(lcd_adc > ADC_LOWER_LIMIT_PLS_TYPE)
 		{
 			lcd_type = LCD_TYPE_PLS;
+		}
+		else if(lcd_adc > ADC_LOWER_LIMIT_T8_TYPE)
+		{
+			lcd_type = LCD_TYPE_T8;
+		}
+		else if(lcd_adc > ADC_LOWER_LIMIT_LCDPLS_TYPE)
+		{
+			lcd_type = LCD_TYPE_LCDPLS;
+		}
+		else if(lcd_adc > ADC_LOWER_LIMIT_VA50_TYPE)
+		{
+			lcd_type = LCD_TYPE_VA50;
+		}
+		else if(lcd_adc > ADC_LOWER_LIMIT_FFS_TYPE)
+		{
+			lcd_type = LCD_TYPE_FFS;
+		}
+		else if(lcd_adc > ADC_LOWER_LIMIT_TN_TYPE)
+		{
+			lcd_type = LCD_TYPE_TN;
+		}
+		else if(lcd_adc > ADC_LOWER_LIMIT_T7_TYPE)
+		{
+			lcd_type = LCD_TYPE_T7;
 		}
 		else
 		{
@@ -463,29 +609,108 @@ static int __init lms700_probe(struct platform_device *pdev)
 	else
 	{
 		lcd_type = LCD_TYPE_VA;
+		lcd_adc = 0;
 	}
-#endif
+//#endif
+	//lcd_type = LCD_TYPE_VA;
 
 	switch(lcd_type)
 	{
-	case LCD_TYPE_VA:
-		pr_info("LCD_TYPE_VA\n");
-		break;
 	case LCD_TYPE_PLS:
 		pr_info("LCD_TYPE_PLS\n");
 		break;
-//	case LCD_TYPE_T3:
-//		pr_info("LCD_TYPE_Type3\n");
-//		break;
-//	case LCD_TYPE_T4:
-//		pr_info("LCD_TYPE_Type4\n");
-//		break;
-//	case LCD_TYPE_T5:
-//		pr_info("LCD_TYPE_Type5\n");
-//		break;
+	case LCD_TYPE_LCDPLS:
+		pr_info("LCD_TYPE_LCDPLS\n");
+		pr_notice("Tuning for this type LCD is not completed yet.\n");
+		break;
+	case LCD_TYPE_VA50:
+		pr_info("LCD_TYPE_VA_50\n");
+		break;
+	case LCD_TYPE_TN:
+		pr_info("LCD_TYPE_TN\n");
+		pr_notice("Tuning for this type LCD is not completed yet.\n");
+		break;
+	case LCD_TYPE_FFS:
+		pr_info("LCD_TYPE_FFS\n");
+		break;
+	case LCD_TYPE_T7:
+		pr_info("LCD_TYPE_T7\n");
+		pr_notice("Tuning for this type LCD is not completed yet.\n");
+		break;
+	case LCD_TYPE_T8:
+		pr_info("LCD_TYPE_T8\n");
+		pr_notice("Tuning for this type LCD is not completed yet.\n");
+		break;
+	case LCD_TYPE_VA:
+	default:
+		pr_info("LCD_TYPE_VA\n");
+		break;
 	}
-	//lcd_type = LCD_TYPE_VA;
 
+	if(lcd_adc > ADC_LOWER_LIMIT_PLS_TYPE)
+	{
+		lcd_vendor_by_adc = LCD_TYPE_PLS;
+	}
+	else if(lcd_adc > ADC_LOWER_LIMIT_T8_TYPE)
+	{
+		lcd_vendor_by_adc = LCD_TYPE_T8;
+	}
+	else if(lcd_adc > ADC_LOWER_LIMIT_LCDPLS_TYPE)
+	{
+		lcd_vendor_by_adc = LCD_TYPE_LCDPLS;
+	}
+	else if(lcd_adc > ADC_LOWER_LIMIT_VA50_TYPE)
+	{
+		lcd_vendor_by_adc = LCD_TYPE_VA50;
+	}
+	else if(lcd_adc > ADC_LOWER_LIMIT_FFS_TYPE)
+	{
+		lcd_vendor_by_adc = LCD_TYPE_FFS;
+	}
+	else if(lcd_adc > ADC_LOWER_LIMIT_TN_TYPE)
+	{
+		lcd_vendor_by_adc = LCD_TYPE_TN;
+	}
+	else if(lcd_adc > ADC_LOWER_LIMIT_T7_TYPE)
+	{
+		lcd_vendor_by_adc = LCD_TYPE_T7;
+	}
+	else
+	{
+		lcd_vendor_by_adc = LCD_TYPE_VA;
+	}		
+
+	switch(lcd_vendor_by_adc)
+	{
+	case LCD_TYPE_PLS:
+		pr_info("LCD vendor: HYDIS PLS\n");
+		break;
+	case LCD_TYPE_LCDPLS:
+		pr_info("LCD vendor: LCD PLS\n");
+		break;
+	case LCD_TYPE_VA50:
+		pr_info("LCD vendor: SMD VA50%%\n");
+		break;
+	case LCD_TYPE_TN:
+		pr_info("LCD vendor: HANNSTAR TN\n");
+		break;
+	case LCD_TYPE_FFS:
+		pr_info("LCD vendor: BOE FFS\n");
+		break;
+	case LCD_TYPE_VA:
+		pr_info("LCD vendor: SMD VA70%%\n");
+		break;
+	case LCD_TYPE_T7:
+		pr_info("LCD vendor: XXX T7\n");
+		break;
+	case LCD_TYPE_T8:
+		pr_info("LCD vendor: XXX T8\n");
+		break;
+	default:
+		pr_info("LCD vendor: none\n");
+		break;
+	}
+	
 	return ret;
 }
 

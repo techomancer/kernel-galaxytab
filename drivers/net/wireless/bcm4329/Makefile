@@ -52,6 +52,7 @@ EXTRA_CFLAGS += -DPKT_FILTER_SUPPORT
 EXTRA_CFLAGS += -DWL_IW_USE_ESCAN
 #Disable PowerSave mode for OTA or certification test
 #EXTRA_CFLAGS += -DBCMDISABLE_PM
+EXTRA_CFLAGS += -DCONFIG_CONTROL_PM
 
 ###############################################################################################
 

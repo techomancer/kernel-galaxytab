@@ -2,6 +2,12 @@
 #define __BMA020_H__
 
 #include <linux/earlysuspend.h>
+#include <linux/workqueue.h>
+#include <linux/wakelock.h>
+#include <linux/timer.h>
+#include <linux/mutex.h>
+#include <linux/hrtimer.h>
+#include <linux/input.h>
 
 /*********** for debug **********************************************************/
 #if 0 
@@ -31,6 +37,7 @@
 
 /* BMA150 IOCTL */
 #define BMA150_IOC_MAGIC 				'B'
+#define BMA150_CALIBRATION				_IOW(BMA150_IOC_MAGIC,2,unsigned char)
 #define BMA150_SET_RANGE            	_IOWR(BMA150_IOC_MAGIC,4, unsigned char)
 #define BMA150_SET_MODE             	_IOWR(BMA150_IOC_MAGIC,6, unsigned char)
 #define BMA150_SET_BANDWIDTH            _IOWR(BMA150_IOC_MAGIC,8, unsigned char)
@@ -81,7 +88,7 @@
 #define RANGE_BWIDTH_REG	0x14
 #define BMA020_CONF2_REG	0x15
 
-#if 0
+#if 1
 #define OFFS_GAIN_X_REG		0x16
 #define OFFS_GAIN_Y_REG		0x17
 #define OFFS_GAIN_Z_REG		0x18
@@ -117,8 +124,8 @@ typedef struct  {
 		customer1,		/**<  image address 0x12: customer reserved register 1 */
 		customer2,		/**<  image address 0x13: customer reserved register 2  */
 		range_bwidth,	/**<  image address 0x14: range and bandwidth selection register */
-		bma020_conf2;	/**<  image address 0x15: spi4, latched interrupt, auto-wake-up configuration */
-#if 0
+		bma020_conf2,	/**<  image address 0x15: spi4, latched interrupt, auto-wake-up configuration */
+#if 1
 		offs_gain_x,	/**<  image address 0x16: offset_x LSB and x-axis gain settings */
 		offs_gain_y,	/**<  image address 0x17: offset_y LSB and y-axis gain settings */
 		offs_gain_z,	/**<  image address 0x18: offset_z LSB and z-axis gain settings */
@@ -144,6 +151,14 @@ typedef struct {
 	BMA020_RD_FUNC_PTR;		  	/**< function pointer to the SPI/I2C read function */
 	void (*delay_msec)( MDELAY_DATA_TYPE ); /**< function pointer to a pause in mili seconds function */
 	struct early_suspend early_suspend;		/**< suspend function */
+
+   	struct work_struct work_acc;
+	struct hrtimer timer;
+	ktime_t acc_poll_delay;
+	u8 state;
+	struct mutex power_lock;
+	struct workqueue_struct *wq;
+	struct input_dev *acc_input_dev;
 } bma020_t;
 
 
@@ -221,7 +236,7 @@ typedef struct {
 #define ACC_Z_MSB__MSK		0xFF
 #define ACC_Z_MSB__REG		Z_AXIS_MSB_REG
 
-#if 0
+#if 1
 #define TEMPERATURE__POS 	0
 #define TEMPERATURE__LEN 	8
 #define TEMPERATURE__MSK 	0xFF
@@ -296,7 +311,7 @@ typedef struct {
 #define SELF_TEST1__REG		BMA020_CTRL_REG
 
 
-#if 0
+#if 1
 #define EE_W__POS			4
 #define EE_W__LEN			1
 #define EE_W__MSK			0x10
@@ -499,7 +514,7 @@ typedef struct {
 #define SPI4__REG				BMA020_CONF2_REG
 
 
-#if 0
+#if 1
 #define OFFSET_X_LSB__POS	6
 #define OFFSET_X_LSB__LEN	2
 #define OFFSET_X_LSB__MSK	0xC0

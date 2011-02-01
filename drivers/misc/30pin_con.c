@@ -19,6 +19,10 @@
 
 #include <mach/max8998_function.h>
 
+#if defined(CONFIG_KEYBOARD_P1)
+#include <linux/wakelock.h>
+static struct wake_lock wake_lock_for_kbd;
+#endif
 
 
 #define SUBJECT "CONNECTOR_DRIVER"
@@ -68,6 +72,7 @@ extern int MHD_HW_IsOn(void);
 extern int MHD_Read_deviceID(void);
 extern byte MHD_Bridge_detect(void);
 extern void MHD_INT_clear(void);
+extern void MHD_OUT_EN(void);
 
 //extern byte MHD_Bridge_detect();
 
@@ -286,6 +291,14 @@ void acc_con_intr_handle(struct work_struct *_work)
 	//ACC_CONDEV_DBG("");
 	//check the flag MHL or keyboard
 	int cur_state = gpio_get_value(GPIO_ACCESSORY_INT);
+#if defined(CONFIG_KEYBOARD_P1)
+    static bool kbd_connected = false;
+    if(kbd_connected)
+    {
+    wake_lock_timeout(&wake_lock_for_kbd, HZ);
+        kbd_connected = false;
+    }
+#endif
 
 	if(cur_state !=DOCK_STATE)
 	{
@@ -316,6 +329,7 @@ void acc_con_intr_handle(struct work_struct *_work)
         	if(check_keyboard_dock())
         	{
 				CONNECTED_DOCK = DOCK_KEYBD;
+                        kbd_connected = true;
 			}
 			else
 #endif				
@@ -505,7 +519,8 @@ void acc_MHD_intr_handle(struct work_struct *_work)
 
 	int val = gpio_get_value(GPIO_MHL_INT);
 	ACC_CONDEV_DBG("++GPIO_MHL_INT =  %x",val);
-	MHD_Bridge_detect();
+	if(val && (!gpio_get_value(GPIO_ACCESSORY_INT)))
+		MHD_OUT_EN();
 	enable_irq(IRQ_MHL_INT);
 }
 
@@ -525,10 +540,10 @@ void acc_MHD_interrupt_init(void)
 	int ret;
 	
 	s3c_gpio_cfgpin(GPIO_MHL_INT, S3C_GPIO_SFN(0xF));
-	s3c_gpio_setpull(GPIO_MHL_INT, S3C_GPIO_PULL_NONE);
+	s3c_gpio_setpull(GPIO_MHL_INT, S3C_GPIO_PULL_DOWN);
 	set_irq_type(IRQ_MHL_INT, IRQ_TYPE_EDGE_RISING);
 	
-	ret = request_irq(IRQ_MHL_INT, acc_MHD_interrupt, IRQF_DISABLED, "Bridge Detected", NULL);
+	ret = request_irq(IRQ_MHL_INT, acc_MHD_interrupt, IRQF_DISABLED, "MHL recovery", NULL);
 	if (ret)
 	 	ACC_CONDEV_DBG("Fail to register IRQ : GPIO_MHL_INT return : %d\n",ret);
 
@@ -604,6 +619,9 @@ static int acc_con_probe(struct platform_device *pdev)
 	//acc_MHD_workqueue = create_singlethread_workqueue("acc_MHD_workqueue");
 	//acc_MHD_interrupt_init();
 
+#if defined(CONFIG_KEYBOARD_P1)
+    wake_lock_init(&wake_lock_for_kbd, WAKE_LOCK_SUSPEND, "kbd_wake_lock");
+#endif
 	if (device_create_file(acc_dev, &dev_attr_MHD_file) < 0)
 		printk("Failed to create device file(%s)!\n", dev_attr_MHD_file.attr.name);
 
@@ -650,11 +668,14 @@ static int acc_con_resume(struct platform_device *pdev)
 	ACC_CONDEV_DBG("");
 	if(0 == gpio_get_value(GPIO_ACCESSORY_INT))
 	{
+#if 0
 		if(CONNECTED_DOCK == DOCK_KEYBD)
 		{
 			check_keyboard_dock();
 		}
-		else if(CONNECTED_DOCK == DOCK_DESK)
+		else
+#endif
+             if(CONNECTED_DOCK == DOCK_DESK)
 		{
 #ifdef CONFIG_MHL_SII9234		
 			//max8998_ldo3_8_control(1,LDO_TV_OUT); //ldo 3,8 on

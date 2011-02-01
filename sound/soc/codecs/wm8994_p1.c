@@ -1319,11 +1319,7 @@ void wm8994_record_main_mic(struct snd_soc_codec *codec)
 	wm8994_write(codec, WM8994_GPIO_1, 0xA101);   // GPIO1 is Input Enable
 
 	// for stable pcm input when start google voice recognition
-	if(wm8994->recognition_active == REC_ON
-#ifdef FEATURE_VSUITE_RECOGNITION
-		|| wm8994->vsuite_recognition_active == REC_ON
-#endif				
-	) 
+	if(wm8994->recognition_active == REC_ON) 
 	{
 		msleep(300);
 	}
@@ -1814,7 +1810,7 @@ void wm8994_set_playback_speaker(struct snd_soc_codec *codec)
 
 	//Disable end point for preventing pop up noise.
 	val = wm8994_read(codec,WM8994_POWER_MANAGEMENT_1);
-	val &= ~(WM8994_SPKOUTL_ENA_MASK);
+	val &= ~(WM8994_SPKOUTL_ENA_MASK | WM8994_SPKOUTR_ENA_MASK);
 	wm8994_write(codec, WM8994_POWER_MANAGEMENT_1, val);
 
 	val = wm8994_read(codec, WM8994_POWER_MANAGEMENT_3);
@@ -2335,6 +2331,8 @@ void wm8994_set_playback_extra_dock_speaker(struct snd_soc_codec *codec)
 
 	DEBUG_LOG("");
 
+	wm8994_write(codec, WM8994_ANTIPOP_2, 0x0048);
+       
 	//OUTPUT mute
 	val = wm8994_read(codec, WM8994_POWER_MANAGEMENT_3);
 	val &= ~(WM8994_LINEOUT2N_ENA_MASK | WM8994_LINEOUT2P_ENA_MASK);
@@ -2437,8 +2435,8 @@ void wm8994_set_playback_extra_dock_speaker(struct snd_soc_codec *codec)
 	wm8994_write(codec, WM8994_CLOCKING_1, val);
 
 	val = wm8994_read(codec,WM8994_POWER_MANAGEMENT_3);
-	val &= ~(WM8994_LINEOUT2N_ENA_MASK | WM8994_LINEOUT2P_ENA_MASK | WM8994_MIXOUTLVOL_ENA_MASK | WM8994_MIXOUTRVOL_ENA_MASK | WM8994_MIXOUTL_ENA_MASK | WM8994_MIXOUTR_ENA_MASK);
-	val |= (WM8994_LINEOUT2N_ENA | WM8994_LINEOUT2P_ENA | WM8994_MIXOUTL_ENA | WM8994_MIXOUTR_ENA | WM8994_MIXOUTRVOL_ENA | WM8994_MIXOUTLVOL_ENA);
+	val &= ~(WM8994_MIXOUTLVOL_ENA_MASK | WM8994_MIXOUTRVOL_ENA_MASK | WM8994_MIXOUTL_ENA_MASK | WM8994_MIXOUTR_ENA_MASK);
+	val |= (WM8994_MIXOUTL_ENA | WM8994_MIXOUTR_ENA | WM8994_MIXOUTRVOL_ENA | WM8994_MIXOUTLVOL_ENA);
 	wm8994_write(codec,WM8994_POWER_MANAGEMENT_3,val);
 
 	val = wm8994_read(codec,WM8994_POWER_MANAGEMENT_1 );
@@ -2458,6 +2456,13 @@ void wm8994_set_playback_extra_dock_speaker(struct snd_soc_codec *codec)
 	val &= ~(WM8994_LINEOUT_VMID_BUF_ENA_MASK | WM8994_HPOUT2_IN_ENA_MASK | WM8994_LINEOUT1_DISCH_MASK | WM8994_LINEOUT2_DISCH_MASK);
 	val |= WM8994_LINEOUT_VMID_BUF_ENA ;
 	wm8994_write(codec,WM8994_ANTIPOP_1,val);
+
+	msleep(230);
+
+	val = wm8994_read(codec, WM8994_POWER_MANAGEMENT_3);
+	val &= ~(WM8994_LINEOUT2N_ENA_MASK | WM8994_LINEOUT2P_ENA_MASK);
+	val |= (WM8994_LINEOUT2N_ENA | WM8994_LINEOUT2P_ENA);    
+	wm8994_write(codec, WM8994_POWER_MANAGEMENT_3, val);
 
 }
 
@@ -4116,11 +4121,7 @@ void wm8994_set_voicecall_record(struct snd_soc_codec *codec, int channel)
                                 wm8994_write(codec, WM8994_GPIO_1, 0xA101);   // GPIO1 is Input Enable
 
                                 // for stable pcm input when start google voice recognition
-                                if(wm8994->recognition_active == REC_ON
-#ifdef FEATURE_VSUITE_RECOGNITION
-                                	|| wm8994->vsuite_recognition_active == REC_ON
-#endif				
-                                ) 
+                                if(wm8994->recognition_active == REC_ON) 
                                 {
                                         msleep(300);
                                 }
@@ -4478,8 +4479,8 @@ void wm8994_set_fmradio_headset(struct snd_soc_codec *codec)
 	wm8994_write(codec, WM8994_DAC2_LEFT_MIXER_ROUTING, val);
 
 	val = wm8994_read(codec, WM8994_DAC2_RIGHT_MIXER_ROUTING);	//605H : 0x0010
-	val &= ~(WM8994_ADC1_TO_DAC2R_MASK);
-	val |= (WM8994_ADC1_TO_DAC2R);
+	val &= ~(WM8994_ADC2_TO_DAC2R_MASK);
+	val |= (WM8994_ADC2_TO_DAC2R);			// Changed value to support stereo
 	wm8994_write(codec, WM8994_DAC2_RIGHT_MIXER_ROUTING, val);
 
 	val = wm8994_read(codec, WM8994_DAC2_LEFT_VOLUME);	//612 : 1C0
@@ -4731,8 +4732,8 @@ void wm8994_set_fmradio_speaker(struct snd_soc_codec *codec)
 
 	//ADCR_TO_DAC2R
 	val = wm8994_read(codec, WM8994_DAC2_RIGHT_MIXER_ROUTING);	//605H : 0x0010
-	val &= ~(WM8994_ADC1_TO_DAC2R_MASK);
-	val |= (WM8994_ADC1_TO_DAC2R);
+	val &= ~(WM8994_ADC2_TO_DAC2R_MASK);
+	val |= (WM8994_ADC2_TO_DAC2R);					// Changed value to support stereo
 	wm8994_write(codec, WM8994_DAC2_RIGHT_MIXER_ROUTING, val);
 
 	//DAC block volume
@@ -5005,8 +5006,8 @@ void wm8994_set_fmradio_speaker_headset_mix(struct snd_soc_codec *codec)
 	wm8994_write(codec, WM8994_DAC2_LEFT_MIXER_ROUTING, val);
 
 	val = wm8994_read(codec, WM8994_DAC2_RIGHT_MIXER_ROUTING);	//605H : 0x0010
-	val &= ~(WM8994_ADC1_TO_DAC2R_MASK);
-	val |= (WM8994_ADC1_TO_DAC2R);
+	val &= ~(WM8994_ADC2_TO_DAC2R_MASK);
+	val |= (WM8994_ADC2_TO_DAC2R);					// Changed value to support stereo
 	wm8994_write(codec, WM8994_DAC2_RIGHT_MIXER_ROUTING, val);
 	
 	//DRC for Noise-gate (AIF2)

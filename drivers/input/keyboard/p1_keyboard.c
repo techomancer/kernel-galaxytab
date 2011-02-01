@@ -68,9 +68,24 @@ void remapkey_timer(unsigned long data)
     }
 }
 
+void release_all_keys(void)
+{
+    int i;
+    //printk(KERN_DEBUG "[Keyboard] Release the pressed keys.\n");
+    for(i = 0; i < KEYBOARD_MAX; i++)
+    {
+        if(dock_keycodes[i].pressed)
+        {
+            input_report_key(g_data->input_dev, dock_keycodes[i].keycode, 0);
+            dock_keycodes[i].pressed = false;
+        }
+    }
+}
+
 static void key_event_work(struct work_struct *work)
 {
     bool press;
+    static int release_cnt = 0;
     unsigned int keycode;
     unsigned char scan_code;
     struct dock_keyboard_data *data = container_of(work,
@@ -118,6 +133,11 @@ static void key_event_work(struct work_struct *work)
                     // Ignore
                     //dock_keyboard_tx(scan_code);
                 }
+                else if(scan_code == 0x0)
+                {
+                    release_all_keys();
+                    release_cnt = 16;
+                }
                 else
                 {
                     press = ((scan_code & 0x80) != 0x80);
@@ -138,12 +158,6 @@ static void key_event_work(struct work_struct *work)
                         }
                         else
                         {
-                            // workaround keyboard issue
-                            if(!(dock_keycodes[keycode].pressed))
-                            {
-                                input_report_key(data->input_dev, dock_keycodes[keycode].keycode, 1);
-                                msleep(1);
-                            }
                             dock_keycodes[keycode].pressed = false;
                             printk(KERN_DEBUG "[Keyboard] %d key is released.\n", dock_keycodes[keycode].keycode);
                         }
@@ -181,6 +195,15 @@ static void key_event_work(struct work_struct *work)
                         printk(KERN_DEBUG "[Keyboard] wrong key_code : 0x%x\n", scan_code);
                     }
 #endif
+                    if(release_cnt >0)
+                    {
+                        if(press)
+                        {
+                            input_report_key(data->input_dev, dock_keycodes[keycode].keycode, 0);
+                            printk(KERN_DEBUG "[Keyboard] forced release %d key.\n", dock_keycodes[keycode].keycode);
+                        }
+                        release_cnt--;
+                    }
                 }
             }
             else
@@ -227,7 +250,6 @@ int check_keyboard_dock(void)
     int try_cnt = 0;
     int error = 0;
     int max_cnt = 10;
-    int i = 0;
 
     if(gpio_get_value(g_data->gpio))
     {
@@ -238,10 +260,12 @@ int check_keyboard_dock(void)
         /*Do not use the keyboard in this version.
          * Because of the issue with the USB otg.
         */
-#if defined (CONFIG_TARGET_LOCALE_EUR) || defined (CONFIG_TARGET_LOCALE_HKTW) || defined (CONFIG_TARGET_LOCALE_HKTW_FET) || defined (CONFIG_TARGET_LOCALE_USAGSM)
+#if defined (CONFIG_TARGET_LOCALE_EUR) || defined (CONFIG_TARGET_LOCALE_HKTW) || defined (CONFIG_TARGET_LOCALE_HKTW_FET)
         if(HWREV == 0x10||HWREV == 0x11)
 #elif defined (CONFIG_TARGET_LOCALE_KOR)
         if(HWREV < 0xf) // It works only on Rev 13 or later.
+#elif defined (CONFIG_TARGET_LOCALE_USAGSM)
+        if(HWREV < 0x10)
 #else
         if(HWREV >= 0xff)
 #endif
@@ -259,17 +283,21 @@ int check_keyboard_dock(void)
         {
             if((connected_time - boot_time) <= 2000)
             {
-//                max_cnt = 30;
-                msleep(2000);
+                max_cnt = 30;
                 printk(KERN_DEBUG "[Keyboard] ACCESSORY is connected durring the boot.\n");
             }
             first_connection = false;
         }
-        else if((connected_time - disconnected_time) < 3000)
+        else if((connected_time - disconnected_time) < 1000)
         {
             g_data->kl = pre_kl;
-            dockconnected = true;
+//            dockconnected = true;
+            printk(KERN_DEBUG "[Keyboard] kl : %d\n", pre_kl);
        }
+        else
+        {
+            pre_kl = UNKOWN_KEYLAYOUT;
+        }
 
         if(!keyboard_enable)
         {
@@ -337,20 +365,13 @@ int check_keyboard_dock(void)
             }
             dockconnected = false;
             gpio_set_value(GPIO_UART_SEL, pre_uart_path);
-            mod_timer(&g_data->timer, jiffies + 3*HZ);
+            mod_timer(&g_data->timer, jiffies + HZ);
 
             g_data->kl = UNKOWN_KEYLAYOUT;
             pre_connected = false;
             handshaking = false;
             disconnected_time = jiffies_to_msecs(jiffies);
-            for(i = 0; i < KEYBOARD_MAX; i++)
-            {
-                if(dock_keycodes[i].pressed)
-                {
-                    input_report_key(g_data->input_dev, dock_keycodes[i].keycode, 0);
-                    dock_keycodes[i].pressed = false;
-                }
-            }
+            release_all_keys();
         }
         return 0;
     }
@@ -390,7 +411,7 @@ static ssize_t caps_lock_led(struct device *dev, struct device_attribute *attr, 
 {
 //    struct dock_keyboard_data *data = dev->platform_data;
     int i=0;
-    printk(KERN_DEBUG "[Keyboard] Caps lock led : %d.\n", g_data->led_on);
+    //printk(KERN_DEBUG "[Keyboard] Caps lock led : %d.\n", g_data->led_on);
     if(sscanf(buf,"%d",&i)==1)
     {
         if(i == 1)
@@ -518,12 +539,10 @@ static int __devinit dock_keyboard_probe(struct platform_device *pdev)
     init_timer(&data->timer);
     data->timer.expires = jiffies + HZ * 5;
     data->timer.function = keyboard_timer;	/* timer handler */
-    add_timer(&data->timer);
 
     init_timer(&data->key_timer);
     data->key_timer.expires = jiffies + HZ/2;
     data->key_timer.function = remapkey_timer;
-    add_timer(&data->key_timer);
 
     boot_time = jiffies_to_msecs(jiffies);
 

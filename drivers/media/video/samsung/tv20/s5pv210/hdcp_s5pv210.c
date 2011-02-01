@@ -1060,14 +1060,14 @@ static int check_repeater(void)
 
 static bool try_read_receiver(void)
 {
-	u8 i = 0;
+	u16 i = 0;
 	bool ret = false;
 
 	s5p_hdmi_mute_en(true);
 
 	for (i = 0; i < 400; i++) {
 
-		mdelay(250);
+		msleep(250);
 
 		if (hdcp_info.auth_status != RECEIVER_READ_READY) {
 

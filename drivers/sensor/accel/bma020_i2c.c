@@ -23,6 +23,11 @@
 
 static struct i2c_client *g_client;	
 
+void i2c_acc_bma020_delay(unsigned int msec)
+{
+	mdelay(msec);
+}
+
 char i2c_acc_bma020_read(u8 reg, u8 *val, unsigned int len )
 {
 	int 	 err;

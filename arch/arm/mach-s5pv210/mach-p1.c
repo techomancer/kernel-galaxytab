@@ -39,7 +39,9 @@
 #include <media/s5k4ba_platform.h>
 #include <media/s5k4ea_platform.h>
 #include <media/s5k6aa_platform.h>
-
+#ifdef CONFIG_VIDEO_SENSOR_VE
+#include <media/camsensor_type.h> // VE_GROUP
+#endif
 #include <plat/regs-serial.h>
 #include <plat/s5pv210.h>
 #include <plat/devs.h>
@@ -92,7 +94,9 @@
 
 #include <media/isx005_platform.h>
 #include <media/s5k6aafx_platform.h>
-
+#ifdef CONFIG_VIDEO_S5K5CCGX // VE_GROUP [[
+#include <media/s5k5ccgx_platform.h>
+#endif // VE_GROUP ]]
 #include <linux/modemctl.h>
 #include <linux/onedram.h>
 
@@ -140,6 +144,7 @@ static struct platform_device s3c_device_qtts = {
 };
 
 /* << additional feature - end */
+#define SOC_DUALCAM_POWERCTRL // VE_GROUP
 
 /* Following are default values for UCON, ULCON and UFCON UART registers */
 #define S5PV210_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
@@ -1065,6 +1070,266 @@ static struct s3c_platform_camera s5k6aafx = {
 };
 #endif
 
+#ifdef CONFIG_VIDEO_S5K5CCGX
+static void s5k5ccgx_ldo_en(bool onoff)
+{
+	if(onoff)
+	{
+		Set_MAX8998_PM_OUTPUT_Voltage(LDO13, VCC_2p800);
+		Set_MAX8998_PM_REG(ELDO13, 1);
+#ifdef SOC_DUALCAM_POWERCTRL
+		if(HWREV <= 0x03){ // Under Rev0.3
+			Set_MAX8998_PM_OUTPUT_Voltage(LDO14, VCC_1p500);
+			Set_MAX8998_PM_REG(ELDO14, 1);
+			udelay(50);
+		} else if(HWREV >= 0x04){ //Over Rev0.4
+			Set_MAX8998_PM_OUTPUT_Voltage(LDO12, VCC_1p500);
+			Set_MAX8998_PM_REG(ELDO12, 1);
+			udelay(50);
+		}
+#endif
+		if(HWREV <= 0x3) { // Under Rev0.3 
+			Set_MAX8998_PM_OUTPUT_Voltage(LDO12, VCC_1p200);
+			Set_MAX8998_PM_REG(ELDO12, 1);
+		} else if(HWREV >=0x4) { //Over Rev0.4
+			Set_MAX8998_PM_OUTPUT_Voltage(LDO14, VCC_1p200);
+			Set_MAX8998_PM_REG(ELDO14, 1);
+		}
+		if(HWREV <= 0x3) {  // Under Rev0.3
+			Set_MAX8998_PM_OUTPUT_Voltage(LDO15, VCC_2p800);
+			Set_MAX8998_PM_REG(ELDO15, 1);
+		} else if(HWREV >= 0x4) {  //Over Rev0.4
+			Set_MAX8998_PM_OUTPUT_Voltage(LDO15, VCC_3p000);
+			Set_MAX8998_PM_REG(ELDO15, 1);
+		}
+		Set_MAX8998_PM_OUTPUT_Voltage(LDO11, VCC_2p800);
+		Set_MAX8998_PM_REG(ELDO11, 1);
+	} 
+	else 
+	{
+		Set_MAX8998_PM_REG(ELDO11, 0);
+		Set_MAX8998_PM_REG(ELDO15, 0);
+		if(HWREV <= 0x3) 
+			Set_MAX8998_PM_REG(ELDO12, 0);
+		else if(HWREV >= 0x4) 
+			Set_MAX8998_PM_REG(ELDO14, 0);
+#ifdef SOC_DUALCAM_POWERCTRL
+		if(HWREV <= 0x03){ // Under Rev0.3
+			Set_MAX8998_PM_REG(ELDO14, 0);
+		} else if(HWREV >= 0x04){ //Over Rev0.4
+			Set_MAX8998_PM_REG(ELDO12, 0);
+		}
+#endif		
+		Set_MAX8998_PM_REG(ELDO13, 0);
+	}
+}
+int s5k5ccgx_cam_stdby(bool en)
+{
+	int err;
+	printk("<MACHINE> stdby(%d)\n", en);
+	err = gpio_request(GPIO_CAM_MEGA_EN, "GPJ1");
+	if (err)
+	{
+		printk(KERN_ERR "failed to request GPJ1 for camera control\n");
+		return err;
+	}
+	gpio_direction_output(GPIO_CAM_MEGA_EN, 0);
+	msleep(1);
+	gpio_direction_output(GPIO_CAM_MEGA_EN, 1);
+	msleep(1);
+	if(en)
+	{
+		gpio_set_value(GPIO_CAM_MEGA_EN, 1);
+	} 
+	else 
+	{
+		gpio_set_value(GPIO_CAM_MEGA_EN, 0); 
+	}
+	msleep(1);
+	gpio_free(GPIO_CAM_MEGA_EN);
+	return 0;
+}
+static int s5k5ccgx_cam_nrst(bool nrst)
+{
+	int err;
+	printk("s5k5ccgx_cam_nrst(%d)\n", nrst);
+	err = gpio_request(GPIO_CAM_MEGA_nRST, "GPJ1");
+	if (err) 
+	{
+		printk(KERN_ERR "failed to request GPJ1 for camera control\n");
+		return err;
+	}
+	gpio_direction_output(GPIO_CAM_MEGA_nRST, 0);
+	msleep(1);
+	gpio_direction_output(GPIO_CAM_MEGA_nRST, 1);
+	msleep(1);
+	msleep(1);
+	if (nrst)
+	{
+		gpio_set_value(GPIO_CAM_MEGA_nRST, 1);
+		msleep(1);
+	}
+	else
+	{
+		gpio_set_value(GPIO_CAM_MEGA_nRST, 0);	
+		msleep(1);
+	}
+	gpio_free(GPIO_CAM_MEGA_nRST);
+	return 0;
+}
+static int s5k5ccgx_power_on(void)
+{
+	int err;
+	printk(KERN_DEBUG "s5k5ccgx_power_on\n");
+	err = gpio_request(GPIO_CAM_MEGA_EN, "GPJ1");
+	if(err) {
+		printk(KERN_ERR "failed to request GPJ0 for camera control\n");
+		return err;
+	}
+	err = gpio_request(GPIO_CAM_MEGA_nRST, "GPJ1");
+	if(err) {
+		printk(KERN_ERR "failed to request GPJ1 for camera control\n");
+		return err;
+	}
+#ifdef SOC_DUALCAM_POWERCTRL 
+	err = gpio_request(GPIO_CAM_VGA_nSTBY, "GPB");
+	if (err) {
+		printk(KERN_ERR "failed to request GPIO for camera nSTBY pin\n");
+		return err;
+	}
+	err = gpio_request(GPIO_CAM_VGA_nRST, "GPB");
+	if (err) {
+		printk(KERN_ERR "failed to request GPIO for camera nRST pin\n");
+		return err;
+	}
+#endif
+	s5k5ccgx_ldo_en(TRUE);
+#ifdef SOC_DUALCAM_POWERCTRL 
+	udelay(60);
+	gpio_direction_output(GPIO_CAM_VGA_nSTBY, 0);
+	gpio_set_value(GPIO_CAM_VGA_nSTBY, 1);
+	mdelay(5);	
+#endif
+	s3c_gpio_cfgpin(GPIO_CAM_MCLK, S5PV210_GPE1_3_CAM_A_CLKOUT);
+#ifdef SOC_DUALCAM_POWERCTRL 
+	gpio_direction_output(GPIO_CAM_VGA_nRST, 0);
+	gpio_set_value(GPIO_CAM_VGA_nRST, 1);		
+	mdelay(7);	
+	gpio_direction_output(GPIO_CAM_VGA_nSTBY, 1);
+	gpio_set_value(GPIO_CAM_VGA_nSTBY, 0);
+	udelay(20);
+#endif
+	gpio_direction_output(GPIO_CAM_MEGA_EN, 0);
+	gpio_set_value(GPIO_CAM_MEGA_EN, 1);
+	mdelay(1);
+	gpio_direction_output(GPIO_CAM_MEGA_nRST, 0);
+	gpio_set_value(GPIO_CAM_MEGA_nRST, 1);
+	msleep(10);
+	gpio_free(GPIO_CAM_MEGA_EN);
+	gpio_free(GPIO_CAM_MEGA_nRST);
+#ifdef SOC_DUALCAM_POWERCTRL 
+	gpio_free(GPIO_CAM_VGA_nSTBY);
+	gpio_free(GPIO_CAM_VGA_nRST);	
+#endif
+	return 0;
+}
+static int s5k5ccgx_power_off(void)
+{
+	int err;
+	printk(KERN_DEBUG "s5k5ccgx_power_off\n");
+	err = gpio_request(GPIO_CAM_MEGA_EN, "GPJ1");
+	if(err) {
+		printk(KERN_ERR "failed to request GPJ0 for camera control\n");
+		return err;
+	}
+	err = gpio_request(GPIO_CAM_MEGA_nRST, "GPJ1");
+	if(err) {
+		printk(KERN_ERR "failed to request GPJ1 for camera control\n");
+		return err;
+	}
+#ifdef SOC_DUALCAM_POWERCTRL 
+	err = gpio_request(GPIO_CAM_VGA_nRST, "GPB");
+	if (err) {
+		printk(KERN_ERR "failed to request GPIO for camera nRST pin\n");
+		return err;
+	}
+#endif
+	gpio_direction_output(GPIO_CAM_MEGA_nRST, 1);
+	gpio_set_value(GPIO_CAM_MEGA_nRST, 0);
+	mdelay(1);
+	s3c_gpio_cfgpin(GPIO_CAM_MCLK, 0);
+	gpio_direction_output(GPIO_CAM_MEGA_EN, 1);
+	gpio_set_value(GPIO_CAM_MEGA_EN, 0);
+#ifdef SOC_DUALCAM_POWERCTRL 
+	gpio_direction_output(GPIO_CAM_VGA_nRST, 1);
+	gpio_set_value(GPIO_CAM_VGA_nRST, 0);
+#endif
+	s5k5ccgx_ldo_en(FALSE);
+	gpio_free(GPIO_CAM_MEGA_EN);
+	gpio_free(GPIO_CAM_MEGA_nRST);
+#ifdef SOC_DUALCAM_POWERCTRL 
+	gpio_free(GPIO_CAM_VGA_nRST);	
+#endif
+	return 0;
+}
+static int s5k5ccgx_power_en(int onoff)
+{
+	if(onoff) {
+		s5k5ccgx_power_on();
+	}
+	else {
+		s5k5ccgx_power_off();
+		s3c_i2c0_force_stop();
+	}
+	return 0;
+}
+static int s5k5ccgx_reset(struct v4l2_subdev *sd)
+{
+	s5k5ccgx_power_en(0);
+	mdelay(5);
+	s5k5ccgx_power_en(1);
+	mdelay(5);
+	return 0;
+}
+static struct s5k5ccgx_platform_data s5k5ccgx_plat = {
+	.default_width = 800,
+	.default_height = 600,
+	.pixelformat = V4L2_PIX_FMT_UYVY,
+	.freq = 24000000,
+	.is_mipi = 0,
+};
+static struct i2c_board_info  s5k5ccgx_i2c_info = {
+	I2C_BOARD_INFO("S5K5CCGX", 0x78>>1),
+	.platform_data = &s5k5ccgx_plat,
+};
+static struct s3c_platform_camera s5k5ccgx = {
+	.id		= CAMERA_PAR_A,
+	.type		= CAM_TYPE_ITU,
+	.fmt		= ITU_601_YCBCR422_8BIT,
+	.order422	= CAM_ORDER422_8BIT_CBYCRY,
+	.i2c_busnum	= 0,
+	.info		= &s5k5ccgx_i2c_info,
+	.pixelformat	= V4L2_PIX_FMT_UYVY,
+	.srclk_name = "xusbxti",
+	.clk_name	= "sclk_cam0",
+	.clk_rate	= 24000000,
+	.line_length	= 1536,//480,
+	.width		= 800,
+	.height		= 600,
+	.window		= {
+		.left	= 0,
+		.top	= 0,
+		.width	= 800,
+		.height	= 600,
+	},
+	.inv_pclk	= 0,
+	.inv_vsync 	= 1,
+	.inv_href	= 0,
+	.inv_hsync	= 0,
+	.initialized 	= 0,
+	.cam_power	= s5k5ccgx_power_en,
+};
+#endif
 #ifdef CONFIG_VIDEO_ISX005
 /**
  * isx005_ldo_en()
@@ -1399,6 +1664,9 @@ static struct s3c_platform_fimc fimc_plat = {
 #endif /* CONFIG_VIDEO_ISX005 */
 #ifdef CONFIG_VIDEO_S5K6AAFX
 		&s5k6aafx,
+#endif
+#ifdef CONFIG_VIDEO_S5K5CCGX // VE_GROUP
+		&s5k5ccgx,
 #endif
 	},
 	.hw_ver		= 0x43,
@@ -3665,7 +3933,7 @@ static void smdkc110_power_off (void)
 #endif			
 		{
 			kernel_sec_clear_upload_magic_number();
-		
+
 			/* POWER_N -> Input */
 			s3c_gpio_cfgpin(GPIO_nPOWER, S3C_GPIO_INPUT);
 			s3c_gpio_setpull(GPIO_nPOWER, S3C_GPIO_PULL_NONE);

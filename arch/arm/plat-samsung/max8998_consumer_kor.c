@@ -150,7 +150,7 @@ const unsigned int (*dvs_volt_table[2])[3] = {
 */
 static const unsigned int dvs_arm_voltage_set_1DOT2GHZ[][2] = {
 	{DVSARM1, 1300}, //  1275}, 
-	{DVSARM2, 1200},
+	{DVSARM2, 1225},
 	{DVSARM3, 1050},
 	{DVSARM4, 1325}, //{DVSARM4, 950},
 	{DVSINT1, 1100},
@@ -159,7 +159,7 @@ static const unsigned int dvs_arm_voltage_set_1DOT2GHZ[][2] = {
 
 static const unsigned int dvs_arm_voltage_set_1GHZ[][2] = {
 	{DVSARM1, 1300}, //  1275}, 
-	{DVSARM2, 1200},
+	{DVSARM2, 1225},
 	{DVSARM3, 1050},
 	{DVSARM4, 950},
 	{DVSINT1, 1100},

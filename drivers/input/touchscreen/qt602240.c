@@ -79,7 +79,6 @@ gen_commandprocessor_t6_config_t    command_config = {0};
 
 static report_finger_info_t fingerInfo[MAX_USING_FINGER_NUM];
 
-static bool bLedOn = false;
 static bool set_mode_for_ta = false;		// true: TA or USB, false: normal
 static int set_mode_for_amoled = 0;		//0: TFt-LCD, 1: AMOLED
 //static int config_mode_val = 0; 	//0: normal 1: stylus
@@ -135,10 +134,10 @@ void led_control_INTLOCK(int data)
 
     data = data -1;
 
-    local_irq_disable(); 
+    local_irq_disable();
     gpio_set_value(KEYLED_EN, 0);
     udelay(2);
-    
+
     for(i = 0; i < data; i++)
     {
         gpio_set_value(KEYLED_EN, 1);
@@ -163,27 +162,56 @@ void init_led(void)
     }
 }
 
-void touch_led_on(bool bOn)
+void touch_led_on(int val)
 {
-    if(bOn)
-    {
-        if(!bLedOn)
-        {
 #ifndef CONFIG_TARGET_LOCALE_KOR
+    static int preset = 0;
+    int set = 2;
+    printk(KERN_DEBUG "[TSP] keyled : %d \n", val );
+
+    if(val < 42)
+        set = 1;
+
+    if(val > 0)
+    {
+        if(set !=preset)
+        {
             //KEYLED is only working in low current mode.
             led_control_INTLOCK(16);
             led_control_INTLOCK(KEYLED_ADDRESS_MAX);      // [Address ] Max current setting
             led_control_INTLOCK(KEYLED_DATA_LOW);           // [Data] Low current mode
             led_control_INTLOCK(KEYLED_ADDRESS_LOW);      // [Address] Low current mode
-            led_control_INTLOCK(4);                                     // [Data] 2mA
-#else // P1_KOR current of LED is set to 3.1mA 15th level of max 15mA
+            if(set == 1)
+            {
+                led_control_INTLOCK(2);                                     // [Data] 0.5mA
+                preset = 1;
+                printk(KERN_DEBUG "[TSP] keyled : 0.5mA\n");
+            }
+            else
+            {
+                led_control_INTLOCK(4);                                     // [Data] 2mA
+                preset = 2;
+                printk(KERN_DEBUG "[TSP] keyled : 2mA\n");
+            }
+        }
+    }
+    else
+    {
+        gpio_set_value(KEYLED_EN, 0);
+        preset = 0;
+    }
+#else
+    static bool bLedOn = false;
+    if(val > 0)
+    {
+        if(!bLedOn)
+        {
             led_control_INTLOCK(16);
             led_control_INTLOCK(KEYLED_ADDRESS_CURRENT);      // [Address] current level setting
             led_control_INTLOCK(15);                                     // [Data] 15th level
 
             led_control_INTLOCK(KEYLED_ADDRESS_MAX);      // [Address ] Max current setting
             led_control_INTLOCK(3);           // [Data] 15ma MAX mode
-#endif
             bLedOn = true;
         }
     }
@@ -192,8 +220,10 @@ void touch_led_on(bool bOn)
         gpio_set_value(KEYLED_EN, 0);
         bLedOn = false;
     }
+#endif
 }
 
+#if 0
 void touch_led_ctl(int type)
 {
     int data =0;
@@ -232,6 +262,7 @@ void touch_led_ctl(int type)
         led_control(data);
     }
 }
+#endif
 
 static ssize_t key_led_store(struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t size)
@@ -242,16 +273,7 @@ static ssize_t key_led_store(struct device *dev, struct device_attribute *attr,
         printk(KERN_ERR"[TSP] keyled write error\n");
     }
 
-    if(i == 255)
-    {
-        touch_led_on(true);
-        printk(KERN_DEBUG "[TSP] %s: keyled is on.\n", __func__);
-    }
-    else
-    {
-        touch_led_on(false);
-        printk(KERN_DEBUG "[TSP] %s: keyled is off.\n", __func__);
-    }
+    touch_led_on(i);
 
     return size;
 }
@@ -490,7 +512,7 @@ int QT602240_Command_Config_Init(struct qt602240_data *data)
 
 int QT602240_Powr_Config_Init(struct qt602240_data *data)
 {
-    power_config.idleacqint = 0x40;//0x20    //64ms in idle status
+    power_config.idleacqint = 32;//0x20    //32ms in idle status
     power_config.actvacqint = 0xff;           // free run in active status
     power_config.actv2idleto = 0x32;          //10s
     return (qt602240_reg_write(data, GEN_POWERCONFIG_T7, (void *) &power_config));
@@ -542,7 +564,7 @@ int QT602240_Multitouch_Config_Init(struct qt602240_data *data)
     touchscreen_config.orient = 0x04;       // 0x4 : Invert Y, 0x2 : Invert X, 0x1 : Switch
 
     touchscreen_config.mrgtimeout = 0x00;
-    touchscreen_config.movhysti = 15;   //0x1;    // Move hysteresis, initial
+    touchscreen_config.movhysti = 16;   //0x1;    // Move hysteresis, initial
     touchscreen_config.movhystn = 10;  //0x1     // Move hysteresis, next
 #if defined(CONFIG_TARGET_LOCALE_KOR) || defined (CONFIG_TARGET_LOCALE_USAGSM)
     touchscreen_config.movfilter = 0x0c;              // Filter Limit[6:4] , Adapt threshold [3:0]
@@ -586,7 +608,7 @@ int QT602240_KeyArrary_Config_Init(struct qt602240_data *data)
         keyarray_config.yorigin = 0x0b;
         keyarray_config.xsize = 0x04;
         keyarray_config.ysize = 0x01;
-        keyarray_config.akscfg = 0;
+        keyarray_config.akscfg = 1;
         keyarray_config.blen = 0x00;
 #ifdef CONFIG_TARGET_LOCALE_USAGSM
         keyarray_config.tchthr = 15;        //25
@@ -2661,7 +2683,7 @@ static void qt602240_early_suspend(struct early_suspend *early_sus)
 #if defined (KEY_LED_CONTROL)
     if(HWREV >=0x5)
     {
-        touch_led_on(false);
+        touch_led_on(0);
     }
 #endif      //KEY_LED_CONTROL
 

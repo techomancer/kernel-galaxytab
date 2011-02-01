@@ -636,7 +636,7 @@ dhd_timeout_expired(dhd_timeout_t *tmo)
 		init_waitqueue_head(&delay_wait);
 		add_wait_queue(&delay_wait, &wait);
 		set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(1);
+		schedule_timeout(msecs_to_jiffies(1));
 		pending = signal_pending(current);
 		remove_wait_queue(&delay_wait, &wait);
 		set_current_state(TASK_RUNNING);
@@ -925,6 +925,29 @@ dhd_op_if(dhd_if_t *ifp)
 	}
 }
 
+
+static volatile int deepsleep_lock = 0;
+
+void 
+dhd_os_deepsleep_block(void)
+{
+	deepsleep_lock = 1;
+}
+
+void 
+dhd_os_deepsleep_unblock(void)
+{
+	deepsleep_lock = 0;
+}
+
+void 
+dhd_os_deepsleep_wait(void)
+{
+	while(deepsleep_lock) {
+		msleep(100);
+	}
+}
+
 static int
 _dhd_sysioc_thread(void *data)
 {
@@ -937,6 +960,8 @@ _dhd_sysioc_thread(void *data)
 	DAEMONIZE("dhd_sysioc");
 
 	while (down_interruptible(&dhd->sysioc_sem) == 0) {
+		dhd_os_deepsleep_wait();
+		dhd_os_deepsleep_block();
 		for (i = 0; i < DHD_MAX_IFS; i++) {
 			if (dhd->iflist[i]) {
 #ifdef SOFTAP
@@ -975,6 +1000,7 @@ _dhd_sysioc_thread(void *data)
 				}
 			}
 		}
+		dhd_os_deepsleep_unblock();
 	}
 	complete_and_exit(&dhd->sysioc_exited, 0);
 }
@@ -2128,14 +2154,18 @@ dhd_read_macaddr(dhd_info_t *dhd)
 
 	//MAC address copied from nv
 	fpnv = filp_open(nvfilepath, O_RDONLY, 0);
-	if (IS_ERR(fpnv)) {
+	if ((fpnv == NULL) || IS_ERR(fpnv)) {
 start_readmac:
 		fpnv = NULL;
 		fp = filp_open(filepath, O_RDONLY, 0);
-		if (IS_ERR(fp)) {
+		if ((fp==NULL) || IS_ERR(fp)) {
 			/* File Doesn't Exist. Create and write mac addr.*/
 			fp = filp_open(filepath, O_RDWR | O_CREAT, 0666);
 			if(IS_ERR(fp)) {
+				if(fp)
+					filp_close(fp,NULL);
+				if(fpnv)
+					filp_close(fpnv,NULL);
 				DHD_ERROR(("[WIFI] %s: File open error\n", filepath));
 				return -1;
 			}
@@ -2455,6 +2485,16 @@ dhd_net_attach(dhd_pub_t *dhdp, int ifidx)
 		wl_iw_iscan_set_scan_broadcast_prep(net, 1);
 #endif /* SOFTAP */
 #endif /* WL_IW_USE_ISCAN */
+#ifdef WL_IW_USE_ESCAN 
+#ifdef SOFTAP 
+    if (ifidx == 0) 
+        /* Don't call for SOFTAP Interface in SOFTAP MODE */ 
+        wl_iw_escan_set_scan_broadcast_prep(net, 1); 
+#else 
+        wl_iw_escan_set_scan_broadcast_prep(net, 1); 
+#endif /* SOFTAP */ 
+#endif /* WL_IW_USE_ESCAN */ 
+
 #endif /* CONFIG_WIRELESS_EXT */
 
 
@@ -2658,9 +2698,9 @@ dhd_module_init(void)
 	 * Kernel MMC sdio device callback registration
 	 */
 	if (down_timeout(&dhd_registration_sem,  msecs_to_jiffies(DHD_REGISTRATION_TIMEOUT)) != 0) {
-		error = -EINVAL;
 		DHD_ERROR(("%s: sdio_register_driver timeout\n", __FUNCTION__));
 		dhd_bus_unregister();
+		goto faild;
 	}
 #endif
 	return error;
@@ -3097,7 +3137,7 @@ dhd_pub_t *dhd_get_pub(struct net_device *dev)
 	return &dhd->pub;
 }
 
-#ifdef DHD_DEBUG
+
 int
 write_to_file(dhd_pub_t *dhd, uint8 *buf, int size)
 {
@@ -3111,7 +3151,7 @@ write_to_file(dhd_pub_t *dhd, uint8 *buf, int size)
 	set_fs(KERNEL_DS);
 
 	/* open file to write */
-	fp = filp_open("/tmp/mem_dump", O_WRONLY|O_CREAT, 0640);
+	fp = filp_open("/data/wifi/mem_dump", O_WRONLY|O_CREAT, 0640);
 	if (!fp) {
 		printf("%s: open file error\n", __FUNCTION__);
 		ret = -1;
@@ -3132,4 +3172,4 @@ exit:
 
 	return ret;
 }
-#endif /* DHD_DEBUG */
+

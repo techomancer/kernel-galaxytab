@@ -1,3 +1,9 @@
+@; Copyright (C) 2003-2010 Samsung Electronics      
+@; This program is free software; you can redistribute it and/or modify
+@; it under the terms of the GNU General Public License version 2 as      
+@; published by the Free Software Foundation.      
+@; version     LinuStoreIII_1.2.0_b038-FSR_1.2.1p1_b139_RTM
+
 	.section C$$code @;@,CODE,READONLY
 	.text
 	.code 32	

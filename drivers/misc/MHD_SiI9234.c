@@ -38,6 +38,7 @@ bool delay_ms(int msec);
 void MHD_HW_Reset(void);
 void MHD_HW_Off(void);
 byte MHD_Bridge_detect(void);
+void MHD_OUT_EN(void);
 void MHD_INT_clear(void);
 
 void I2C_WriteByte(byte deviceID, byte offset, byte value);
@@ -144,14 +145,50 @@ byte MHD_Bridge_detect(void)
 	}
 EXPORT_SYMBOL(MHD_Bridge_detect);
 
+
+void MHD_OUT_EN(void)
+{
+	byte state , int_stat;
+	int_stat = ReadIndexedRegister(INDEXED_PAGE_0,0x74);
+	printk("[MHD]MHD_OUT_EN INT register value is: 0x%02x \n", int_stat);
+	state = ReadIndexedRegister(INDEXED_PAGE_0, 0x81);
+	printk("[MHD]MHD_OUT_EN register 0x81 value is: 0x%02x\n", state);
+	
+	if((state & 0x02) && (int_stat &0x01))
+	{	
+		printk("[MHD]MHD_OUT_EN :: enable output\n");		
+ 		ReadModifyWriteIndexedRegister(INDEXED_PAGE_0,0x80,SI_BIT_4,0x0);
+		msleep(20);	
+		ReadModifyWriteIndexedRegister(INDEXED_PAGE_0,0x80,SI_BIT_4,SI_BIT_4);
+		msleep(60);
+	
+		set_mhd_power_active_mode();
+ 		mhd_tx_fifo_stable(); //fifo clear
+	}
+	MHD_INT_clear();
+}
+
+EXPORT_SYMBOL(MHD_OUT_EN);
+
 void MHD_INT_clear(void)
 {
+
 	byte Int_state;
 	
+#if 0	
 	Int_state= ReadByteTPI(TPI_INTERRUPT_STATUS_REG);
 	
 	WriteByteTPI (TPI_INTERRUPT_STATUS_REG, Int_state);	  // Clear this interrupt.	  
 
+
+
+
+	WriteByteTPI(TPI_INTERRUPT_ENABLE_REG, 0x00);
+	
+	WriteIndexedRegister(INDEXED_PAGE_0, 0x78, 0x01);	// Enable 
+#endif
+	Int_state = ReadIndexedRegister(INDEXED_PAGE_0,0x74);
+	WriteIndexedRegister(INDEXED_PAGE_0,0x74,Int_state);
 }
 
 
@@ -548,8 +585,8 @@ static void TxPowerStateD0 (void)
 static void EnableInterrupts (void) 
 {
 
-	ReadModifyWriteTPI(TPI_INTERRUPT_ENABLE_REG, RECEIVER_SENSE_EVENT_MASK, RECEIVER_SENSE_EVENT_MASK);
-	WriteIndexedRegister(INDEXED_PAGE_0, 0x75, SI_BIT_5);	// Enable 
+	//ReadModifyWriteTPI(TPI_INTERRUPT_ENABLE_REG, RECEIVER_SENSE_EVENT_MASK, RECEIVER_SENSE_EVENT_MASK);
+	WriteIndexedRegister(INDEXED_PAGE_0, 0x78, 0x01);	// Enable 
 }
 
 void CheckTxFifoStable (void) 
@@ -694,11 +731,12 @@ void sii9234_tpi_init(void)
   //MHD_INT_clear();
   sii9234_register_init();
   sii9234_start_tpi();
+  //EnableInterrupts();
   mhd_rx_connected();
   enable_mhd_tx();
   set_mhd_power_active_mode();
   mhd_tx_fifo_stable(); //fifo clear
-  //EnableInterrupts();
+  
   printk("[MHD]9234 init -- \n");
 }
 
@@ -798,6 +836,7 @@ void sii9234_register_init(void)
 	I2C_WriteByte(0x92, 0x4C, 0xA0);			// Manual zone control
 
 	I2C_WriteByte(0x72, 0x80, 0x14);			// Enable Rx PLL Clock Value
+	//I2C_WriteByte(0x72, 0x80, 0x34);
 
 	I2C_WriteByte(0x92, 0x31, 0x0B);			// SIMG: Rx PLL BW value from I2C BW ~ 4MHz
 	I2C_WriteByte(0x92, 0x45, 0x06);			// SIMG: DPLL Mode

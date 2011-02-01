@@ -40,10 +40,7 @@
 #include <siutils.h>
 #include <hndpmu.h>
 #include <hndsoc.h>
-#ifdef DHD_DEBUG
-#include <hndrte_armtrap.h>
-#include <hndrte_cons.h>
-#endif /* DHD_DEBUG */
+
 #include <sbchipc.h>
 #include <sbhnddma.h>
 
@@ -429,10 +426,10 @@ static void dhdsdio_testrcv(dhd_bus_t *bus, void *pkt, uint seq);
 static void dhdsdio_sdtest_set(dhd_bus_t *bus, bool start);
 #endif
 
-#ifdef DHD_DEBUG
+
 static int dhdsdio_checkdied(dhd_bus_t *bus, uint8 *data, uint size);
 static int dhdsdio_mem_dump(dhd_bus_t *bus);
-#endif /* DHD_DEBUG  */
+
 static int dhdsdio_download_state(dhd_bus_t *bus, bool enter);
 
 static void dhdsdio_release(dhd_bus_t *bus, osl_t *osh);
@@ -1386,11 +1383,9 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		         __FUNCTION__, rxlen, msglen));
 	} else if (timeleft == 0) {
 		DHD_ERROR(("%s: resumed on timeout\n", __FUNCTION__));
-#if 0 /* #ifdef DHD_DEBUG */
 		dhd_os_sdlock(bus->dhd);
 		dhdsdio_checkdied(bus, NULL, 0);
 		dhd_os_sdunlock(bus->dhd);
-#endif /* DHD_DEBUG */
 	} else if (pending == TRUE) {
 		DHD_CTL(("%s: cancelled\n", __FUNCTION__));
 		return -ERESTARTSYS;
@@ -1705,7 +1700,29 @@ xfer_done:
 	return bcmerror;
 }
 
-#ifdef DHD_DEBUG
+typedef struct _trap_struct {
+	uint32		type;
+	uint32		epc;
+	uint32		cpsr;
+	uint32		spsr;
+	uint32		r0;
+	uint32		r1;
+	uint32		r2;
+	uint32		r3;
+	uint32		r4;
+	uint32		r5;
+	uint32		r6;
+	uint32		r7;
+	uint32		r8;
+	uint32		r9;
+	uint32		r10;
+	uint32		r11;
+	uint32		r12;
+	uint32		r13;
+	uint32		r14;
+	uint32		pc;
+} trap_t;
+
 static int
 dhdsdio_readshared(dhd_bus_t *bus, sdpcm_shared_t *sh)
 {
@@ -1742,6 +1759,7 @@ dhdsdio_readshared(dhd_bus_t *bus, sdpcm_shared_t *sh)
 	sh->console_addr = ltoh32(sh->console_addr);
 	sh->msgtrace_addr = ltoh32(sh->msgtrace_addr);
 
+#if 0
 	if ((sh->flags & SDPCM_SHARED_VERSION_MASK) != SDPCM_SHARED_VERSION) {
 		DHD_ERROR(("%s: sdpcm_shared version %d in dhd "
 		           "is different than sdpcm_shared version %d in dongle\n",
@@ -1749,6 +1767,7 @@ dhdsdio_readshared(dhd_bus_t *bus, sdpcm_shared_t *sh)
 		           sh->flags & SDPCM_SHARED_VERSION_MASK));
 		return BCME_ERROR;
 	}
+#endif
 
 	return BCME_OK;
 }
@@ -1858,7 +1877,7 @@ dhdsdio_checkdied(dhd_bus_t *bus, uint8 *data, uint size)
 		DHD_ERROR(("%s: %s\n", __FUNCTION__, strbuf.origbuf));
 	}
 
-#ifdef DHD_DEBUG
+#if 1 /* DHD_DEBUG */
 	if (sdpcm_shared.flags & SDPCM_SHARED_TRAP) {
 		/* Mem dump to a file on device */
 		dhdsdio_mem_dump(bus);
@@ -1924,8 +1943,10 @@ dhdsdio_mem_dump(dhd_bus_t *bus)
 	/* buf free handled in write_to_file, not here */
 	return 0;
 }
+
 #define CONSOLE_LINE_MAX	192
 
+#ifdef DHD_DEBUG
 static int
 dhdsdio_readconsole(dhd_bus_t *bus)
 {
@@ -4091,6 +4112,8 @@ dhdsdio_hostmail(dhd_bus_t *bus)
 	return intstatus;
 }
 
+extern int is_mmc_resume;
+
 bool
 dhdsdio_dpc(dhd_bus_t *bus)
 {
@@ -4103,8 +4126,20 @@ dhdsdio_dpc(dhd_bus_t *bus)
 	uint framecnt = 0;		  /* Temporary counter of tx/rx frames */
 	bool rxdone = TRUE;		  /* Flag for no more read data */
 	bool resched = FALSE;	  /* Flag indicating resched wanted */
+	uint32 retrylimit = 0; 
 
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
+
+	while (is_mmc_resume) {
+//		printk("Delay during resuming start\n");
+		msleep(10);
+
+		if (retrylimit < 1000)
+			++retrylimit;
+		else 
+			break; 
+//		printk("Delay during resuming end\n");
+	}
 
 	/* Start with leftover status bits */
 	intstatus = bus->intstatus;

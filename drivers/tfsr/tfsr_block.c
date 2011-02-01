@@ -9,7 +9,7 @@
  *---------------------------------------------------------------------------*
 */
 /**
- * @version	LinuStoreIII_1.2.0_b034-FSR_1.2.1p1_b129_RC
+ * @version	LinuStoreIII_1.2.0_b038-FSR_1.2.1p1_b139_RTM
  * @file        drivers/tfsr/tfsr_block.c
  * @brief       This file is BML common part which supports the raw interface
  *              It provides block device operations and utilities

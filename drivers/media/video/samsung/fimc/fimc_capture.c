@@ -12,6 +12,7 @@
  * published by the Free Software Foundation.
 */
 
+#include <media/camsensor_type.h> // VE_GROUP SENSORS 
 #include <linux/slab.h>
 #include <linux/bootmem.h>
 #include <linux/string.h>
@@ -40,6 +41,10 @@
 #undef fimc_dbg
 #endif
 #define fimc_dbg fimc_err
+#endif
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[
+int gcamera_sensor_back_type = CAMERA_SENSOR_ID_BACK_ORG; // VE_GROUP
+int gcamera_sensor_back_checked = false; 
 #endif
 
 const static struct v4l2_fmtdesc capture_fmts[] = {
@@ -217,6 +222,11 @@ static int fimc_camera_init(struct fimc_control *ctrl)
 
 	/* subdev call for init */
 	ret = subdev_call(ctrl, core, init, 0);
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP 
+	if (ret < 0) {
+		gcamera_sensor_back_checked = false;
+	}
+#endif
 	if (ret == -ENOIOCTLCMD) {
 		fimc_err("%s: init subdev api not supported\n",
 			__func__);
@@ -646,9 +656,20 @@ int fimc_s_input(struct file *file, void *fh, unsigned int i)
 	 * called from the "SecCamera.cpp" with a special value = 1000
 	 * Then here we release the camera and reconfigure it.
 	 */
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[ // VE_GROUP TODO
+	if (i == 2000)	
+	{
+		return ((gcamera_sensor_back_checked&0xFF)<<8)|(gcamera_sensor_back_type&0xFF); 
+	}
+#endif
 	if (i == 1000) {
 		dev_err(ctrl->dev, "ESD code is running\n");
 		fimc_release_subdev(ctrl);
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[
+		if (gcamera_sensor_back_checked)
+			i = gcamera_sensor_back_type;
+		else
+#endif // VE_GROUP ]]
 		i = 0;
 	}
 
@@ -691,6 +712,32 @@ int fimc_s_input(struct file *file, void *fh, unsigned int i)
 
 	mutex_unlock(&ctrl->v4l2_lock);
 
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP SENSORS [[ // VE_GROUP TODO
+	printk("%s checked (%d) , id (%d)",__func__  , gcamera_sensor_back_checked , gcamera_sensor_back_type );
+	if ((i==0 || i >= CAMERA_SENSOR_ID_BACK_VE_START && i < CAMERA_SENSOR_ID_BACK_VE_END )&& !gcamera_sensor_back_checked)
+	{
+		struct v4l2_control v_ctrl;
+		int err = 0;
+		if (ctrl->cam->cam_power && !(ctrl->device_onoff))
+		{
+			ctrl->cam->cam_power(1);
+			ctrl->device_onoff = 1;
+		}
+		v_ctrl.id = V4L2_CID_CAM_SENSOR_TYPE;
+		err = ctrl->cam->sd->ops->core->g_ctrl(ctrl->cam->sd,&v_ctrl);
+		if (err >= 0)
+		{
+			gcamera_sensor_back_type = i;
+			gcamera_sensor_back_checked = true;
+		}
+		if (ctrl->cam->cam_power && ctrl->device_onoff)
+		{
+			ctrl->cam->cam_power(0);
+			ctrl->device_onoff = 0;
+		}
+		return err;
+	}
+#endif // VE_GROUP ]]
 	return 0;
 }
 
@@ -1510,8 +1557,26 @@ int fimc_streamon_capture(void *fh)
 	int rot;
 	int ret;
 
+#ifdef CONFIG_VIDEO_SENSOR_VE // VE_GROUP [[
+	switch (gcamera_sensor_back_type)
+	{
+		case CAMERA_SENSOR_ID_ISX005:
+			{
+			char *isx005 = "ISX005 0-001a";
+			ctrl->device_id = strcmp(ctrl->cam->sd->name, isx005);
+			}
+			break;
+		case CAMERA_SENSOR_ID_S5K5CCGX:
+			{
+			char *s5k5ccgx = "S5K5CCGX 0-001c";
+			ctrl->device_id = strcmp(ctrl->cam->sd->name, s5k5ccgx);
+			}
+			break;
+	}
+#else
 	char *isx005 = "ISX005 0-001a";
 	ctrl->device_id = strcmp(ctrl->cam->sd->name, isx005);
+#endif // VE_GROUP ]]
 	fimc_dbg("%s, name(%s), device_id(%d), vtmode(%d)\n", __func__, ctrl->cam->sd->name , ctrl->device_id, ctrl->vt_mode);
 
 	fimc_dbg("%s\n", __func__);

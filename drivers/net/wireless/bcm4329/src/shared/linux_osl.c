@@ -168,7 +168,8 @@ osl_attach(void *pdev, uint bustype, bool pkttag)
 {
 	osl_t *osh;
 
-	osh = kmalloc(sizeof(osl_t), GFP_ATOMIC);
+//	osh = kmalloc(sizeof(osl_t), GFP_ATOMIC);
+	osh = kmalloc(sizeof(osl_t), GFP_KERNEL);
 	ASSERT(osh);
 
 	bzero(osh, sizeof(osl_t));

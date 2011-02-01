@@ -76,6 +76,8 @@ obj-$(CONFIG_VIDEO_S5K4BA)		+= s5k4ba.o
 obj-$(CONFIG_VIDEO_S5K4EA)		+= s5k4ea.o
 obj-$(CONFIG_VIDEO_S5K6AA)		+= s5k6aa.o
 obj-$(CONFIG_VIDEO_ISX005)	+= isx005.o
+# VE_GROUP
+obj-$(CONFIG_VIDEO_S5K5CCGX)	+= s5k5ccgx.o
 obj-$(CONFIG_VIDEO_S5K6AAFX)	+= s5k6aafx.o
 # latin_atv [
 obj-$(CONFIG_VIDEO_NM6XX)	+= nm6xx.o
