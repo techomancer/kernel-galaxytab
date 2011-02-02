@@ -45,6 +45,7 @@ obj-$(CONFIG_IDE)		+= ide/
 obj-$(CONFIG_SCSI)		+= scsi/
 obj-$(CONFIG_ATA)		+= ata/
 obj-$(CONFIG_MTD)		+= mtd/
+obj-$(CONFIG_TINY_FSR)		+= tfsr/
 obj-$(CONFIG_SPI)		+= spi/
 obj-$(CONFIG_SWI)		+= swi/
 obj-y				+= net/
@@ -129,5 +130,10 @@ obj-$(CONFIG_STAGING)		+= staging/
 obj-$(CONFIG_SENSOR)		+= sensor/
 obj-y				+= platform/
 obj-y				+= ieee802154/
+obj-$(CONFIG_DPRAM_BUILT_IN)  += onedram/
+ifneq ($(CONFIG_TARGET_LOCALE_VZW),y)
+obj-$(CONFIG_DPRAM_BUILT_IN)  += svnet/
+obj-$(CONFIG_DPRAM_BUILT_IN)  += modemctl/
+endif
 obj-y   += level/
 
