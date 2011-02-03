@@ -10,7 +10,7 @@ export LD_LIBRARY_PATH=.:${TOOLCHAIN}/../lib
 
 KERNEL_DEFCONFIG()
 {
-	make ARCH=arm p1_android_rfs_eur_defconfig
+	make ARCH=arm p1_android_rfs_eur_cm7_defconfig
 }
 
 KERNEL_MENUCONFIG()
@@ -21,7 +21,7 @@ KERNEL_MENUCONFIG()
 KERNEL_BUILD()
 {
 	rm -rf initramfs
-	cp -r ../initramfs/galaxytab initramfs
+	cp -rv ../initramfs/galaxytab initramfs
 	rm -rf initramfs/.git
 	make -j$CPU_JOB_NUM ARCH=arm CROSS_COMPILE=$TOOLCHAIN/$TOOLCHAIN_PREFIX
 }
