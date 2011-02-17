@@ -20,9 +20,11 @@ KERNEL_MENUCONFIG()
 
 KERNEL_BUILD()
 {
-	rm -rf initramfs
-	cp -rv ../initramfs/galaxytab initramfs
-	rm -rf initramfs/.git
 	make -j$CPU_JOB_NUM ARCH=arm CROSS_COMPILE=$TOOLCHAIN/$TOOLCHAIN_PREFIX
+}
+
+KERNEL_BUILD_MODULES()
+{
+	make -j$CPU_JOB_NUM ARCH=arm CROSS_COMPILE=$TOOLCHAIN/$TOOLCHAIN_PREFIX modules
 }
 
