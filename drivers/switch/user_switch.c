@@ -40,7 +40,9 @@
 #define DRIVER_NAME  "usb_mass_storage"
 
 
+#if defined(CONFIG_KEYBOARD_P1)
 extern bool keyboard_enable;
+#endif
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -152,7 +154,9 @@ static void Ap_Cp_Switch_Config(u16 ap_cp_mode)
 			usb_api_set_usb_switch(USB_SW_CP);
 			break;
 		case CP_UART_MODE:
+#if defined(CONFIG_KEYBOARD_P1)
                     if(!keyboard_enable)
+#endif
                     {
         			gpio_set_value(GPIO_UART_SEL, 0);
                     }
